@@ -49,7 +49,15 @@ class Parser:
         return graph, nb_drones
 
     def _parse_nb_drones(self, line: str, line_num: int) -> int:
-        pass
+        parts = line.split(":", 1)
+        if len(parts) != 2:
+            raise ParseError(line_num, "Invalid nb_drones format.")
+
+        value = parts[1].strip()
+        if not value.isdigit() or int(value) <= 0:
+            raise ParseError(line_num, "nb_drones must be positive integer.")
+
+        return int(value)
 
     def _parse_zone(
         self,
@@ -58,9 +66,97 @@ class Parser:
         is_start: bool = False,
         is_end: bool = False,
     ) -> Zone:
-        pass
+        metadata, line = self._parse_metadata(line, line_num)
+        parts = line.split()
+
+        if len(parts) != 4:
+            raise ParseError(line_num, "Invalid zone format.")
+
+        name = parts[1]
+        try:
+            x = int(parts[2])
+            y = int(parts[3])
+        except ValueError as exc:
+            raise ParseError(
+                line_num,
+                "Zone coordinates must be integers.",
+            ) from exc
+
+        zone_type_str = metadata.get("zone", "normal")
+        try:
+            zone_type = ZoneType(zone_type_str)
+        except ValueError as exc:
+            raise ParseError(
+                line_num,
+                f"Invalid zone type: {zone_type_str}.",
+            ) from exc
+
+        color = metadata.get("color")
+        max_drones_str = metadata.get("max_drones", "1")
+        if not max_drones_str.isdigit() or int(max_drones_str) <= 0:
+            raise ParseError(line_num, "max_drones must be positive integer.")
+        max_drones = int(max_drones_str)
+
+        return Zone(
+            name=name,
+            x=x,
+            y=y,
+            zone_type=zone_type,
+            color=color,
+            max_drones=max_drones,
+            is_start=is_start,
+            is_end=is_end,
+        )
 
     def _parse_connection(
         self, line: str, line_num: int, graph: Graph
     ) -> Connection:
-        pass
+        metadata, line = self._parse_metadata(line, line_num)
+        parts = line.split(":", 1)
+
+        if len(parts) != 2:
+            raise ParseError(
+                line_num,
+                "Invalid connection format.",
+            )
+
+        zone_names = parts[1].strip().split("-")
+        if len(zone_names) != 2:
+            raise ParseError(line_num, "Connection must be zoneA-zoneB.")
+
+        zone_a_name, zone_b_name = zone_names
+        zone_a = graph.get_zone(zone_a_name)
+        zone_b = graph.get_zone(zone_b_name)
+
+        if not zone_a:
+            raise ParseError(line_num, f"Zone '{zone_a_name}' not found.")
+        if not zone_b:
+            raise ParseError(line_num, f"Zone '{zone_b_name}' not found.")
+
+        capacity_str = metadata.get("max_link_capacity", "1")
+        if not capacity_str.isdigit() or int(capacity_str) <= 0:
+            raise ParseError(
+                line_num,
+                "max_link_capacity must be positive integer.",
+            )
+        capacity = int(capacity_str)
+
+        return Connection(zone_a, zone_b, capacity)
+
+    def _parse_metadata(
+        self, line: str, line_num: int
+    ) -> tuple[dict[str, str], str]:
+        metadata: dict[str, str] = {}
+        match = re.search(r"\[(.*?)\]", line)
+
+        if match is None:
+            return metadata, line
+
+        for item in match.group(1).split():
+            if "=" not in item:
+                raise ParseError(line_num, f"Invalid metadata: {item}.")
+            key, value = item.split("=", 1)
+            metadata[key] = value
+
+        line_without_metadata = line[:match.start()].strip()
+        return metadata, line_without_metadata
