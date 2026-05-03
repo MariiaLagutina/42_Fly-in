@@ -146,6 +146,12 @@ class Parser:
     def _parse_metadata(
         self, line: str, line_num: int
     ) -> tuple[dict[str, str], str]:
+        """
+        Uses re.search to find a "non-greedy"
+        match between brackets.
+        It returns a tuple containing a dictionary of metadata
+        and the "cleaned" line.
+        """
         metadata: dict[str, str] = {}
         match = re.search(r"\[(.*?)\]", line)
 
