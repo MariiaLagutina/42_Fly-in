@@ -20,6 +20,9 @@ class Graph:
     def add_connection(self, connection: Connection) -> None:
         self.connections.append(connection)
 
+    def has_connection(self, zone_a: Zone, zone_b: Zone) -> bool:
+        return self.get_connection(zone_a, zone_b) is not None
+
     def get_zone(self, name: str) -> Optional[Zone]:
         return self.zones.get(name)
 

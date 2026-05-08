@@ -20,6 +20,7 @@ class Zone:
         max_drones: int = 1,
         is_start: bool = False,
         is_end: bool = False,
+        reservations: int = 0,
     ) -> None:
         self.name = name
         self.x = x
@@ -29,6 +30,7 @@ class Zone:
         self.max_drones = max_drones
         self.is_start = is_start
         self.is_end = is_end
+        self.reservations: int = reservations
 
     def movement_cost(self) -> int:
         if self.zone_type == ZoneType.RESTRICTED:

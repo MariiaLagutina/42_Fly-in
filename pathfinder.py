@@ -118,7 +118,69 @@ class Pathfinder:
         conn_reservations: dict[tuple[str, int], int],
         global_usage: dict[str, int],
     ) -> list[Zone]:
-        pass
+        """
+        Finds a path from start to end while considering current reservations
+        and traffic. Uses a cooperrative A* with a time component to avoid
+        zones and connections that are heavily reserved at specific times.
+        """
+        visited: set[tuple[str, int]] = set()
+        counter = 0
+        min_heap: list[TimedPathHeapItem] = [(0.0, counter, 0, start, [start])]
+
+        while min_heap:
+            score, _, t, current_zone, path = heapq.heappop(min_heap)
+
+            state = (current_zone.name, t)
+            if state in visited:
+                continue
+            visited.add(state)
+
+            if current_zone == end:
+                return path
+
+            possible_moves = []
+            for neighbor in self.graph.get_neighbors(current_zone):
+                possible_moves.append(neighbor)
+
+            possible_moves.append(current_zone)
+
+            for next_zone in possible_moves:
+                move_cost = (
+                    1
+                    if next_zone == current_zone
+                    else next_zone.movement_cost()
+                )
+                next_t = t + move_cost
+                priority_discount = (
+                    0.1 if next_zone.zone_type.name == "PRIORITY" else 0.0
+                )
+
+                booked_zone = reservations.get((next_zone.name, next_t), 0)
+                if booked_zone >= next_zone.effective_capacity():
+                    continue
+
+                if next_zone != current_zone:
+                    conn = self.graph.get_connection(current_zone, next_zone)
+                    if conn:
+                        booked_conn = conn_reservations.get(
+                            (conn.name(), t), 0
+                        )
+                        if booked_conn >= conn.max_link_capacity:
+                            continue
+
+                hist_traffic = global_usage.get(next_zone.name, 0) * 0.01
+                curr_traffic = booked_zone * 0.02
+
+                counter += 1
+                traffic = hist_traffic + curr_traffic
+                sort_time = score + move_cost - priority_discount + traffic
+
+                heapq.heappush(
+                    min_heap,
+                    (sort_time, counter, next_t, next_zone, path + [next_zone])
+                )
+
+        return []
 
     def _pathfinding_cost(self, zone: Zone) -> float:
         """

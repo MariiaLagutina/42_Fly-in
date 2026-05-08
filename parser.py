@@ -133,6 +133,12 @@ class Parser:
         if not zone_b:
             raise ParseError(line_num, f"Zone '{zone_b_name}' not found.")
 
+        # Check for duplicate connections
+        if graph.has_connection(zone_a, zone_b):
+            raise ParseError(
+                line_num, f"Duplicate connection: {zone_a_name}-{zone_b_name}."
+            )
+
         capacity_str = metadata.get("max_link_capacity", "1")
         if not capacity_str.isdigit() or int(capacity_str) <= 0:
             raise ParseError(
@@ -164,5 +170,5 @@ class Parser:
             key, value = item.split("=", 1)
             metadata[key] = value
 
-        line_without_metadata = line[:match.start()].strip()
+        line_without_metadata = line[: match.start()].strip()
         return metadata, line_without_metadata
