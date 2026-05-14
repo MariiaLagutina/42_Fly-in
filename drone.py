@@ -17,6 +17,7 @@ class Drone:
         self.state: str = DroneState.WAITING
         self.transit_turns_left: int = 0
         self.transit_target: Optional[Zone] = None
+        self.transit_connection_name: Optional[str] = None
 
     @property
     def label(self) -> str:

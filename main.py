@@ -3,7 +3,7 @@ import sys
 from events import EventDispatcher
 from parser import Parser, ParseError
 from simulation import Simulator
-from visualizers import AirlinesVisualizer, Visualizer
+from visualizers import AirlinesVisualizer, CapacityInfoVisualizer, Visualizer
 
 
 def main() -> None:
@@ -21,12 +21,18 @@ def main() -> None:
 
     dispatcher = (
         EventDispatcher()
-        if args.airlines or args.pygame_airlines
+        if args.airlines or args.pygame_airlines or args.capacity_info
         else None
     )
     airlines_visualizer = AirlinesVisualizer() if args.airlines else None
     if dispatcher is not None and airlines_visualizer is not None:
         dispatcher.add_listener(airlines_visualizer)
+
+    capacity_visualizer = (
+        CapacityInfoVisualizer() if args.capacity_info else None
+    )
+    if dispatcher is not None and capacity_visualizer is not None:
+        dispatcher.add_listener(capacity_visualizer)
 
     pygame_visualizer = None
     if args.pygame_airlines:
@@ -40,7 +46,7 @@ def main() -> None:
         graph,
         nb_drones,
         dispatcher,
-        enable_dynamic_weather=args.pygame_airlines
+        enable_dynamic_weather=args.pygame_airlines,
     )
     turns = simulator.run()
 
@@ -53,11 +59,22 @@ def main() -> None:
     if airlines_visualizer is not None:
         for line in airlines_visualizer.render():
             print(line)
+        if capacity_visualizer is not None:
+            for line in capacity_visualizer.render():
+                print(line)
         return
 
     visualizer = Visualizer(graph, use_color=args.visual)
-    for turn in turns:
+    capacity_blocks = (
+        capacity_visualizer.render_blocks()
+        if capacity_visualizer is not None
+        else []
+    )
+    for index, turn in enumerate(turns):
         print(visualizer.render_turn(turn))
+        if index < len(capacity_blocks):
+            for line in capacity_blocks[index]:
+                print(line)
 
 
 def _parse_args() -> argparse.Namespace:
@@ -77,6 +94,11 @@ def _parse_args() -> argparse.Namespace:
         "--pygame-airlines",
         action="store_true",
         help="Open the optional Pygame aviation visualizer",
+    )
+    parser.add_argument(
+        "--capacity-info",
+        action="store_true",
+        help="Display real-time zone and connection capacity usage",
     )
     return parser.parse_args()
 

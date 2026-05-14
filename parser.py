@@ -26,12 +26,22 @@ class Parser:
                     nb_drones = self._parse_nb_drones(line, line_num)
                 elif line.startswith("start_hub:"):
                     zone = self._parse_zone(line, line_num, is_start=True)
+                    self._validate_new_zone(graph, zone, line_num)
+                    if graph.start_zone is not None:
+                        raise ParseError(
+                            line_num,
+                            "Start zone already defined.",
+                        )
                     graph.add_zone(zone)
                 elif line.startswith("end_hub:"):
                     zone = self._parse_zone(line, line_num, is_end=True)
+                    self._validate_new_zone(graph, zone, line_num)
+                    if graph.end_zone is not None:
+                        raise ParseError(line_num, "End zone already defined.")
                     graph.add_zone(zone)
                 elif line.startswith("hub:"):
                     zone = self._parse_zone(line, line_num)
+                    self._validate_new_zone(graph, zone, line_num)
                     graph.add_zone(zone)
                 elif line.startswith("connection:"):
                     conn = self._parse_connection(line, line_num, graph)
@@ -47,6 +57,15 @@ class Parser:
             raise ParseError(0, "End zone not defined.")
 
         return graph, nb_drones
+
+    def _validate_new_zone(
+        self,
+        graph: Graph,
+        zone: Zone,
+        line_num: int,
+    ) -> None:
+        if graph.get_zone(zone.name) is not None:
+            raise ParseError(line_num, f"Duplicate zone name: {zone.name}.")
 
     def _parse_nb_drones(self, line: str, line_num: int) -> int:
         parts = line.split(":", 1)

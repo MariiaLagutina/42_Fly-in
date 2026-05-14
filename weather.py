@@ -1,10 +1,16 @@
 import random
-from graph import Graph
+
 from connection import Connection
 from events import EventDispatcher, WeatherChanged
+from graph import Graph
+
 
 class WeatherSystem:
-    def __init__(self, graph: Graph, dispatcher: EventDispatcher | None = None) -> None:
+    def __init__(
+        self,
+        graph: Graph,
+        dispatcher: EventDispatcher | None = None,
+    ) -> None:
         self.graph = graph
         self.dispatcher = dispatcher
         self.active_storms: list[Connection] = []
@@ -18,8 +24,13 @@ class WeatherSystem:
                 self._emit_weather(turn_number, conn)
 
         for conn in self.graph.connections:
-            if conn.weather_condition == "clear" and random.random() < self.storm_chance:
-                condition = random.choice(["snow", "storm", "tailwind", "rain"])
+            if (
+                conn.weather_condition == "clear"
+                and random.random() < self.storm_chance
+            ):
+                condition = random.choice(
+                    ["snow", "storm", "tailwind", "rain"]
+                )
 
                 if condition in ["snow", "storm"]:
                     conn.set_weather(condition, is_open=False)
@@ -36,6 +47,6 @@ class WeatherSystem:
                     turn_number,
                     conn.name(),
                     conn.weather_condition,
-                    conn.is_open
+                    conn.is_open,
                 )
             )

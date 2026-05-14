@@ -32,6 +32,13 @@ class TurnFinished:
 
 
 @dataclass(frozen=True)
+class CapacitySnapshot:
+    turn_number: int
+    zone_usage: tuple[tuple[str, int, int | float], ...]
+    connection_usage: tuple[tuple[str, int, int], ...]
+
+
+@dataclass(frozen=True)
 class WeatherChanged:
     turn_number: int
     connection_name: str
@@ -44,6 +51,7 @@ SimulationEvent = Union[
     AgentMoved,
     AgentRefueling,
     TurnFinished,
+    CapacitySnapshot,
     WeatherChanged,
 ]
 

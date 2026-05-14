@@ -1,17 +1,17 @@
-from multiprocessing.connection import Connection
+from connection import Connection
 from drone import Drone, DroneState
 from events import (
     AgentMoved,
     AgentRefueling,
+    CapacitySnapshot,
     EventDispatcher,
     SimulationEvent,
     TurnFinished,
     TurnStarted,
-    WeatherChanged,
 )
 from graph import Graph
 from pathfinder import Pathfinder
-from zone import Zone, ZoneType
+from zone import Zone
 from weather import WeatherSystem
 
 
@@ -115,11 +115,12 @@ class Simulator:
     def _execute_turn(self, turn_number: int) -> SimulationTurn:
         turn = SimulationTurn(turn_number)
         self._emit(TurnStarted(turn_number))
-        self.weather_system.update_weather(turn_number)
+        if self.enable_dynamic_weather:
+            self.weather_system.update_weather(turn_number)
         zone_occupancy = self._count_zone_occupancy()
-        connection_usage: dict[str, int] = {}
+        connection_usage = self._count_active_connection_usage()
         moved_drone_ids: set[int] = set()
-        planned_moves: list[tuple[Drone, str]] = []
+        planned_moves: list[tuple[Drone, Connection]] = []
 
         for drone in self.drones:
             if drone.state != DroneState.IN_TRANSIT:
@@ -136,6 +137,7 @@ class Simulator:
             origin = drone.current_zone.name
             drone.current_zone = target
             drone.transit_target = None
+            drone.transit_connection_name = None
             if target.is_end:
                 drone.state = DroneState.DELIVERED
             else:
@@ -186,15 +188,15 @@ class Simulator:
                 continue
 
             connection_usage[conn_name] = used + 1
-            planned_moves.append((drone, conn_name))
+            planned_moves.append((drone, connection))
 
         outgoing_counts: dict[str, int] = {}
-        for drone, _ in planned_moves:
+        for drone, _connection in planned_moves:
             name = drone.current_zone.name
             outgoing_counts[name] = outgoing_counts.get(name, 0) + 1
 
         incoming_counts: dict[str, int] = {}
-        for drone, conn_name in planned_moves:
+        for drone, connection in planned_moves:
             next_zone = drone.next_zone()
             if next_zone is None:
                 continue
@@ -210,18 +212,26 @@ class Simulator:
             zone_occupancy[drone.current_zone.name] -= 1
 
             transit_time = self._calculate_transit_time(next_zone, connection)
+            conn_name = connection.name()
 
             if transit_time > 1:
                 origin = drone.current_zone.name
                 drone.path.pop(0)
                 drone.state = DroneState.IN_TRANSIT
                 drone.transit_target = next_zone
+                drone.transit_connection_name = conn_name
 
                 drone.transit_turns_left = transit_time - 1
 
                 turn.add_movement(drone.label, conn_name)
                 self._emit(
-                    AgentRefueling(turn_number, drone.label, origin, conn_name, next_zone.name)
+                    AgentRefueling(
+                        turn_number,
+                        drone.label,
+                        origin,
+                        conn_name,
+                        next_zone.name,
+                    )
                 )
                 moved_drone_ids.add(drone.drone_id)
                 continue
@@ -251,9 +261,18 @@ class Simulator:
             moved_drone_ids.add(drone.drone_id)
 
         self._emit(TurnFinished(turn_number, tuple(turn.movements)))
+        self._emit_capacity_snapshot(
+            turn_number,
+            zone_occupancy,
+            connection_usage,
+        )
         return turn
 
-    def _calculate_transit_time(self, next_zone: Zone, connection: 'Connection') -> int:
+    def _calculate_transit_time(
+        self,
+        next_zone: Zone,
+        connection: Connection,
+    ) -> int:
         base_time = next_zone.movement_cost()
 
         if not self.enable_dynamic_weather:
@@ -281,6 +300,47 @@ class Simulator:
             zone_occupancy[name] = zone_occupancy.get(name, 0) + 1
 
         return zone_occupancy
+
+    def _count_active_connection_usage(self) -> dict[str, int]:
+        connection_usage: dict[str, int] = {}
+        for drone in self.drones:
+            if (
+                drone.state == DroneState.IN_TRANSIT
+                and drone.transit_connection_name is not None
+                and drone.transit_turns_left > 0
+            ):
+                conn_name = drone.transit_connection_name
+                connection_usage[conn_name] = (
+                    connection_usage.get(conn_name, 0) + 1
+                )
+        return connection_usage
+
+    def _emit_capacity_snapshot(
+        self,
+        turn_number: int,
+        zone_occupancy: dict[str, int],
+        connection_usage: dict[str, int],
+    ) -> None:
+        if self.dispatcher is None:
+            return
+
+        zone_usage = tuple(
+            (
+                zone.name,
+                zone_occupancy.get(zone.name, 0),
+                zone.effective_capacity(),
+            )
+            for zone in self.graph.zones.values()
+        )
+        link_usage = tuple(
+            (
+                connection.name(),
+                connection_usage.get(connection.name(), 0),
+                connection.max_link_capacity,
+            )
+            for connection in self.graph.connections
+        )
+        self._emit(CapacitySnapshot(turn_number, zone_usage, link_usage))
 
     def print_results(self) -> None:
         for turn in self.turns:

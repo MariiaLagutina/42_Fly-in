@@ -1,4 +1,10 @@
-from events import AgentMoved, AgentRefueling, SimulationEvent, TurnStarted
+from events import (
+    AgentMoved,
+    AgentRefueling,
+    CapacitySnapshot,
+    SimulationEvent,
+    TurnStarted,
+)
 from graph import Graph
 from simulation import SimulationTurn
 
@@ -82,3 +88,42 @@ class AirlinesVisualizer:
 
     def render(self) -> list[str]:
         return self.lines
+
+
+class CapacityInfoVisualizer:
+    def __init__(self) -> None:
+        self.blocks: list[tuple[str, str, str]] = []
+
+    def handle(self, event: SimulationEvent) -> None:
+        if not isinstance(event, CapacitySnapshot):
+            return
+
+        zones = ", ".join(
+            f"{name}={used}/{self._format_capacity(capacity)}"
+            for name, used, capacity in event.zone_usage
+        )
+        links = ", ".join(
+            f"{name}={used}/{capacity}"
+            for name, used, capacity in event.connection_usage
+        )
+        self.blocks.append(
+            (
+                f"Turn {event.turn_number} capacity",
+                f"  zones: {zones}",
+                f"  links: {links}",
+            )
+        )
+
+    def render(self) -> list[str]:
+        lines: list[str] = []
+        for block in self.blocks:
+            lines.extend(block)
+        return lines
+
+    def render_blocks(self) -> list[tuple[str, str, str]]:
+        return self.blocks
+
+    def _format_capacity(self, capacity: int | float) -> str:
+        if capacity == float("inf"):
+            return "inf"
+        return str(capacity)
