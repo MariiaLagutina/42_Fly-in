@@ -1,0 +1,67 @@
+# === European Network: Cross-Continental Logistics ===
+# Metadata: This map represents a European logistics network with hubs and connections across the continent.
+# Scale: 1 unit = 75 km
+nb_drones: 15
+
+# --- IBERIAN PENINSULA (START) ---
+start_hub: Lisbon 150 500 [color=lisbon max_drones=15]
+hub: Madrid 250 500 [color=madrid max_drones=4]
+
+# --- WESTERN EUROPE ---
+hub: Paris 400 350 [zone=priority color=paris max_drones=4]
+hub: London 350 250 [color=london max_drones=3]
+
+# --- THE ALPS (BOTTLENECK) ---
+# Crossing the Alps is slow (restricted) and has low capacity
+hub: Geneva 450 450 [zone=restricted color=geneva max_drones=2]
+hub: Milan 500 500 [zone=restricted color=milan max_drones=2]
+
+# --- CENTRAL & NORTHERN EUROPE ---
+hub: Brussels 420 300 [color=brussels]
+hub: Berlin 550 280 [zone=priority color=berlin max_drones=5]
+hub: Prague 600 350 [color=prague]
+hub: Vienna 620 420 [color=vienna max_drones=3]
+
+# --- SCANDINAVIA ---
+hub: Oslo 500 150 [color=oslo]
+hub: Stockholm 600 150 [color=stockholm]
+hub: Helsinki 700 120 [color=helsinki]
+
+# --- EASTERN EUROPE ---
+hub: Warsaw 700 280 [color=warsaw max_drones=3]
+hub: Kyiv 850 300 [color=kyiv max_drones=3]
+hub: Bucharest 750 480 [color=bucharest max_drones=3]
+
+# --- SOUTHERN EUROPE & BALKANS (DESTINATION) ---
+hub: Rome 550 580 [color=rome max_drones=3]
+end_hub: Athens 750 650 [color=athens max_drones=15]
+hub: Istanbul 880 620 [color=istanbul max_drones=4]
+
+
+# === FLIGHT ROUTES ===
+
+# Western departures
+connection: Lisbon-Madrid [max_link_capacity=3 distance=300km]
+connection: Madrid-Paris [distance=800km]
+connection: Madrid-Geneva [distance=1000km]
+
+# The Channel & North Sea
+connection: Paris-London [distance=350km]
+connection: Paris-Brussels [distance=300km]
+connection: London-Brussels [distance=350km]
+connection: London-Oslo [distance=1200km]
+
+# Central Europe
+connection: Brussels-Berlin [distance=800km]
+connection: Berlin-Prague [distance=350km]
+connection: Prague-Vienna [distance=300km]
+connection: Vienna-Geneva [distance=700km]
+
+# Eastern Europe
+connection: Warsaw-Kyiv [distance=800km]
+connection: Kyiv-Bucharest [distance=900km]
+connection: Bucharest-Istanbul [distance=600km]
+
+# Southern Europe
+connection: Rome-Athens [distance=1100km]
+connection: Athens-Istanbul [distance=800km]

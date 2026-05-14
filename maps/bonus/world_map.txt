@@ -1,0 +1,79 @@
+# === Global Network: Intercontinental Logistics ===
+# Metadata: This map represents a global logistics network with intercontinental hubs and connections.
+# Scale: 1 unit = 100 km
+nb_drones: 20
+
+# --- THE AMERICAS (START) ---
+start_hub: New_York 300 250 [color=new_york max_drones=20]
+hub: Los_Angeles 150 300 [color=los_angeles max_drones=5]
+hub: Bogota 300 450 [color=bogota max_drones=3]
+hub: Sao_Paulo 380 550 [color=sao_paulo max_drones=4]
+
+# --- THE OCEANS (RESTRICTED BOTTLENECKS) ---
+hub: Atlantic_Ocean 450 350 [zone=restricted color=ocean max_drones=3]
+hub: Indian_Ocean 800 500 [zone=restricted color=ocean max_drones=3]
+
+# --- EUROPE ---
+hub: London 550 200 [color=london max_drones=4]
+hub: Paris 560 230 [zone=priority color=paris max_drones=5]
+hub: Frankfurt 580 220 [color=frankfurt max_drones=4]
+
+# --- AFRICA ---
+hub: Cairo 650 350 [color=cairo max_drones=3]
+hub: Johannesburg 650 600 [color=johannesburg max_drones=2]
+
+# --- ASIA ---
+hub: Dubai 750 350 [zone=priority color=dubai max_drones=6]
+hub: Mumbai 850 400 [color=mumbai max_drones=4]
+hub: Beijing 1000 250 [color=beijing max_drones=5]
+hub: Tokyo 1100 250 [color=tokyo max_drones=4]
+hub: Singapore 950 500 [zone=priority color=singapore max_drones=5]
+
+# --- OCEANIA (DESTINATION) ---
+end_hub: Sydney 1100 650 [color=sydney max_drones=20]
+
+
+# === GLOBAL FLIGHT ROUTES ===
+
+# Americas Internal
+connection: New_York-Los_Angeles [distance=4500km]
+connection: New_York-Bogota [distance=4000km]
+connection: Bogota-Sao_Paulo [distance=5000km]
+
+# The Atlantic Crossing
+connection: New_York-Atlantic_Ocean [max_link_capacity=3 distance=5500km]
+connection: Sao_Paulo-Atlantic_Ocean [distance=6000km]
+connection: Atlantic_Ocean-London [distance=7000km]
+connection: Atlantic_Ocean-Paris [distance=7100km]
+connection: Atlantic_Ocean-Johannesburg [distance=8000km]
+
+# European Network
+connection: London-Paris [distance=350km]
+connection: London-Frankfurt [distance=600km]
+connection: Paris-Frankfurt [distance=450km]
+connection: Paris-Cairo [distance=1500km]
+connection: Frankfurt-Dubai [distance=1500km]
+
+# African Routes
+connection: Cairo-Dubai [distance=1500km]
+connection: Cairo-Johannesburg [distance=1500km]
+connection: Johannesburg-Indian_Ocean [distance=1500km]
+
+# Middle East & Indian Ocean
+connection: Dubai-Mumbai [max_link_capacity=4 distance=1500km]
+connection: Dubai-Indian_Ocean [distance=1500km]
+connection: Mumbai-Indian_Ocean [distance=1500km]
+connection: Mumbai-Singapore [distance=1500km]
+connection: Indian_Ocean-Singapore [max_link_capacity=2 distance=1500km]
+
+# Asian Network
+connection: Dubai-Beijing [distance=1500km]
+connection: Mumbai-Beijing [distance=1500km]
+connection: Beijing-Tokyo [distance=1500km]
+connection: Tokyo-Singapore [distance=1500km]
+connection: Beijing-Singapore [distance=1500km]
+
+# Final Approach to Oceania
+connection: Singapore-Sydney [max_link_capacity=4 distance=1500km]
+connection: Tokyo-Sydney [max_link_capacity=2 distance=1500km]
+connection: Indian_Ocean-Sydney [max_link_capacity=1 distance=1500km]

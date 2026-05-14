@@ -1,3 +1,4 @@
+from multiprocessing.connection import Connection
 from drone import Drone, DroneState
 from events import (
     AgentMoved,
@@ -6,10 +7,12 @@ from events import (
     SimulationEvent,
     TurnFinished,
     TurnStarted,
+    WeatherChanged,
 )
 from graph import Graph
 from pathfinder import Pathfinder
 from zone import Zone, ZoneType
+from weather import WeatherSystem
 
 
 class SimulationTurn:
@@ -33,12 +36,15 @@ class Simulator:
         graph: Graph,
         nb_drones: int,
         dispatcher: EventDispatcher | None = None,
+        enable_dynamic_weather: bool = False,
     ) -> None:
         self.graph = graph
         self.nb_drones = nb_drones
         self.dispatcher = dispatcher
+        self.enable_dynamic_weather = enable_dynamic_weather
         self.drones: list[Drone] = []
         self.pathfinder = Pathfinder(graph)
+        self.weather_system = WeatherSystem(graph, dispatcher)
         self.turns: list[SimulationTurn] = []
         self._create_drones()
 
@@ -109,6 +115,7 @@ class Simulator:
     def _execute_turn(self, turn_number: int) -> SimulationTurn:
         turn = SimulationTurn(turn_number)
         self._emit(TurnStarted(turn_number))
+        self.weather_system.update_weather(turn_number)
         zone_occupancy = self._count_zone_occupancy()
         connection_usage: dict[str, int] = {}
         moved_drone_ids: set[int] = set()
@@ -170,7 +177,7 @@ class Simulator:
                 drone.current_zone,
                 next_zone,
             )
-            if connection is None:
+            if connection is None or not connection.is_open:
                 continue
 
             conn_name = connection.name()
@@ -202,21 +209,19 @@ class Simulator:
 
             zone_occupancy[drone.current_zone.name] -= 1
 
-            if next_zone.zone_type == ZoneType.RESTRICTED:
+            transit_time = self._calculate_transit_time(next_zone, connection)
+
+            if transit_time > 1:
                 origin = drone.current_zone.name
                 drone.path.pop(0)
                 drone.state = DroneState.IN_TRANSIT
                 drone.transit_target = next_zone
-                drone.transit_turns_left = next_zone.movement_cost() - 1
+
+                drone.transit_turns_left = transit_time - 1
+
                 turn.add_movement(drone.label, conn_name)
                 self._emit(
-                    AgentRefueling(
-                        turn_number,
-                        drone.label,
-                        origin,
-                        conn_name,
-                        next_zone.name,
-                    )
+                    AgentRefueling(turn_number, drone.label, origin, conn_name, next_zone.name)
                 )
                 moved_drone_ids.add(drone.drone_id)
                 continue
@@ -225,6 +230,7 @@ class Simulator:
             incoming_counts[next_zone.name] = incoming + 1
             origin = drone.current_zone.name
             moved_to = drone.advance()
+
             if moved_to is None:
                 continue
             if moved_to.is_end:
@@ -246,6 +252,19 @@ class Simulator:
 
         self._emit(TurnFinished(turn_number, tuple(turn.movements)))
         return turn
+
+    def _calculate_transit_time(self, next_zone: Zone, connection: 'Connection') -> int:
+        base_time = next_zone.movement_cost()
+
+        if not self.enable_dynamic_weather:
+            return base_time
+
+        if connection.weather_condition == "tailwind":
+            return max(1, base_time - 1)
+        elif connection.weather_condition == "rain":
+            return base_time + 1
+
+        return base_time
 
     def _emit(self, event: SimulationEvent) -> None:
         if self.dispatcher is not None:

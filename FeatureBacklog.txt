@@ -1,0 +1,45 @@
+Dynamic Weather System & Live Forecast UI
+
+Concept: Integrate a dynamic weather engine that affects flight routes in real-time.
+
+Mechanics: Routes can experience Storms/Snow (closing the path entirely, forcing drones to wait),
+Rain (slowing down transit time), or Tailwinds (speeding up transit).
+
+Visualization: * Render weather icons (clouds, lightning, snow) directly over the affected
+connections on the map.
+
+Implement a "Live Weather Alerts" dashboard overlay to display current active storms and closed routes.
+
+2. Infinite Missions & The "Drone Passport"
+
+Concept: Transform the static pathfinding simulation into a continuous, living logistics network.
+
+Mechanics: Once a drone reaches its destination, it doesn't stop. Instead, it dynamically calculates
+a new A* path to a randomly generated destination on the fly.
+
+Visualization:
+
+Create a "Fleet Status" dashboard.
+
+Implement a "Passport" system: Every time a drone lands, it collects a "stamp" of that city.
+
+Display a visual "VISITED!" stamp animation over the city when a delivery is completed.
+
+3. Custom Geographical Maps & Asset Rendering
+
+Concept: Move away from abstract nodes to real-world geography (Germany, Europe, Global Maps).
+
+Visualization:
+
+Load high-resolution background maps.
+
+Replace standard dots with specific .png assets for different hubs (e.g., city landmarks, coat of arms,
+or ocean tiles) based on the color metadata parsed from the map file.
+
+4. Demographic-Based Hub Capacity (Backend enhancement)
+
+Concept: Tie the maximum drone capacity of a hub to real-world population data.
+
+Mechanics: Update the map parser to read a population= tag. The hub's capacity is mathematically
+calculated based on the city's size (e.g., 1 drone capacity per 250,000 residents), making
+the simulation highly realistic.

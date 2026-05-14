@@ -31,11 +31,20 @@ class TurnFinished:
     movements: tuple[tuple[str, str], ...]
 
 
+@dataclass(frozen=True)
+class WeatherChanged:
+    turn_number: int
+    connection_name: str
+    condition: str
+    is_open: bool
+
+
 SimulationEvent = Union[
     TurnStarted,
     AgentMoved,
     AgentRefueling,
     TurnFinished,
+    WeatherChanged,
 ]
 
 

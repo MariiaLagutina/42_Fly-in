@@ -1,0 +1,56 @@
+# === German Airlines: 16 Federal States ===
+# Metadata: This map represents Germany's federal states with a focus on logistics hubs and connections.
+# Scale: 1 unit = 50 km
+nb_drones: 10
+
+# --- NORTH ---
+hub: Kiel 450 100 [color=kiel max_drones=2]
+hub: Hamburg 450 150 [zone=priority color=hamburg max_drones=3]
+hub: Schwerin 550 150 [color=schwerin]
+hub: Bremen 350 200 [color=bremen]
+
+# --- EAST ---
+hub: Berlin 650 250 [zone=priority color=berlin max_drones=4]
+hub: Potsdam 630 270 [color=potsdam]
+hub: Magdeburg 550 300 [color=magdeburg]
+hub: Dresden 700 400 [color=dresden]
+hub: Erfurt 500 400 [color=erfurt]
+
+# --- WEST & CENTRAL ---
+hub: Hanover 450 250 [color=hanover max_drones=2]
+hub: Dusseldorf 250 350 [color=dusseldorf max_drones=3]
+start_hub: Frankfurt 350 450 [color=frankfurt max_drones=10]
+hub: Mainz 320 470 [color=mainz]
+
+# --- SOUTH & SOUTHWEST ---
+hub: Saarbrucken 250 550 [zone=restricted color=saarbrucken]
+hub: Stuttgart 400 600 [color=stuttgart max_drones=3]
+end_hub: Munich 550 700 [color=munich max_drones=10]
+
+# === FLIGHT ROUTES ===
+# From start hub (Frankfurt)
+connection: Frankfurt-Mainz [distance=50km]
+connection: Frankfurt-Dusseldorf [distance=200km]
+connection: Frankfurt-Stuttgart
+connection: Frankfurt-Saarbrucken
+
+# Northern routes
+connection: Hanover-Bremen
+connection: Hanover-Hamburg
+connection: Hamburg-Kiel
+connection: Hamburg-Schwerin
+connection: Schwerin-Berlin
+
+# Eastern routes
+connection: Hanover-Magdeburg
+connection: Magdeburg-Potsdam
+connection: Potsdam-Berlin
+connection: Berlin-Dresden
+connection: Dresden-Erfurt
+
+# Southern routes
+connection: Dusseldorf-Saarbrucken
+connection: Saarbrucken-Stuttgart [max_link_capacity=2]
+connection: Stuttgart-Munich [max_link_capacity=3]
+connection: Erfurt-Munich
+connection: Frankfurt-Munich [max_link_capacity=2]

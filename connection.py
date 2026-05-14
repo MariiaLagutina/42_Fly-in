@@ -15,6 +15,8 @@ class Connection:
         self.zone_b = zone_b
         self.max_link_capacity = max_link_capacity
         self.current_drones = 0
+        self.is_open: bool = True
+        self.weather_condition: str = "clear"
 
     def connects(self, zone: "Zone") -> bool:
         return zone == self.zone_a or zone == self.zone_b
@@ -37,3 +39,7 @@ class Connection:
 
     def __repr__(self) -> str:
         return f"Connection({self.zone_a.name}, {self.zone_b.name})"
+
+    def set_weather(self, condition: str, is_open: bool) -> None:
+        self.weather_condition = condition
+        self.is_open = is_open
