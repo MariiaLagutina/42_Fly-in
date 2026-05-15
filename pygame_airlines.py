@@ -18,21 +18,27 @@ class PygameAirlinesVisualizer(EventListener):
 
 
 def run_pygame_airlines(visualizer: PygameAirlinesVisualizer) -> None:
-    # 1. Базовая инициализация Pygame
     pygame.init()
     width, height = 1000, 800
     screen = pygame.display.set_mode((width, height))
     pygame.display.set_caption("Fly-in: Global Logistics")
     clock = pygame.time.Clock()
 
-    # --- НОВОЕ: Загрузка картинки-карты и шрифтов ---
+    # --- УМНАЯ ЗАГРУЗКА ФОНА ---
+    bg_image_name = "germany.png"  # По умолчанию
+    
+    # Проверяем, какая карта указана в аргументах запуска
+    for arg in sys.argv:
+        if "maps/bonus/europa_map.txt" in arg.lower():
+            bg_image_name = "europa.png"
+        elif "world_map.txt" in arg.lower():
+            bg_image_name = "world.png"
+    
     try:
-        # Пытаемся загрузить вашу картинку germany.png
-        bg_image = pygame.image.load("germany.png")
-        # Растягиваем ее под размер окна
+        bg_image = pygame.image.load(bg_image_name)
         bg_image = pygame.transform.scale(bg_image, (width, height))
     except FileNotFoundError:
-        print("Warning: germany.png not found! Using solid background.")
+        print(f"Warning: {bg_image_name} not found! Using solid background.")
         bg_image = None
 
     # Загружаем шрифты для названий городов и дашборда

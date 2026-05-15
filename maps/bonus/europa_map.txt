@@ -65,3 +65,7 @@ connection: Bucharest-Istanbul [distance=600km]
 # Southern Europe
 connection: Rome-Athens [distance=1100km]
 connection: Athens-Istanbul [distance=800km]
+
+connection: Berlin-Warsaw [distance=550km]
+connection: Vienna-Rome [distance=1100km]
+connection: Geneva-Rome [distance=900km]
