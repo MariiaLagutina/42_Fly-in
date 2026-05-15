@@ -4,38 +4,41 @@
 nb_drones: 15
 
 # --- IBERIAN PENINSULA (START) ---
-start_hub: Lisbon 150 500 [color=lisbon max_drones=15]
-hub: Madrid 250 500 [color=madrid max_drones=4]
+start_hub: Lisbon 100 600 [color=lisbon max_drones=15]
+hub: Madrid 190 590 [color=madrid max_drones=4]
+hub: Barcelona 270 590 [color=barcelona max_drones=3]
 
 # --- WESTERN EUROPE ---
-hub: Paris 400 350 [zone=priority color=paris max_drones=4]
-hub: London 350 250 [color=london max_drones=3]
+hub: Paris 300 460 [zone=priority color=paris max_drones=4]
+hub: London 270 390 [color=london max_drones=3]
+hub: Amsterdam 350 390 [color=amsterdam]
 
 # --- THE ALPS (BOTTLENECK) ---
 # Crossing the Alps is slow (restricted) and has low capacity
-hub: Geneva 450 450 [zone=restricted color=geneva max_drones=2]
-hub: Milan 500 500 [zone=restricted color=milan max_drones=2]
+hub: Zurich 380 490 [zone=restricted color=zurich max_drones=2]
+hub: Milan 390 520 [zone=restricted color=milan max_drones=2]
 
 # --- CENTRAL & NORTHERN EUROPE ---
-hub: Brussels 420 300 [color=brussels]
-hub: Berlin 550 280 [zone=priority color=berlin max_drones=5]
-hub: Prague 600 350 [color=prague]
-hub: Vienna 620 420 [color=vienna max_drones=3]
+hub: Brussels 340 420 [color=brussels]
+hub: Berlin 440 400 [zone=priority color=berlin max_drones=5]
+hub: Prague 460 440 [color=prague]
+hub: Vienna 480 470 [color=vienna max_drones=3]
+hub: Budapest 530 480 [color=budapest]
 
 # --- SCANDINAVIA ---
-hub: Oslo 500 150 [color=oslo]
-hub: Stockholm 600 150 [color=stockholm]
-hub: Helsinki 700 120 [color=helsinki]
+hub: Oslo 420 250 [color=oslo]
+hub: Stockholm 490 270 [color=stockholm]
+hub: Helsinki 540 250 [color=helsinki]
 
 # --- EASTERN EUROPE ---
-hub: Warsaw 700 280 [color=warsaw max_drones=3]
-hub: Kyiv 850 300 [color=kyiv max_drones=3]
-hub: Bucharest 750 480 [color=bucharest max_drones=3]
+hub: Warsaw 530 390 [color=warsaw max_drones=3]
+hub: Kyiv 660 420 [color=kyiv max_drones=3]
+hub: Bucharest 630 520 [color=bucharest max_drones=3]
 
 # --- SOUTHERN EUROPE & BALKANS (DESTINATION) ---
-hub: Rome 550 580 [color=rome max_drones=3]
-end_hub: Athens 750 650 [color=athens max_drones=15]
-hub: Istanbul 880 620 [color=istanbul max_drones=4]
+hub: Rome 430 580 [color=rome max_drones=3]
+end_hub: Athens 610 650 [color=athens max_drones=15]
+hub: Istanbul 670 580 [color=istanbul max_drones=4]
 
 
 # === FLIGHT ROUTES ===
@@ -43,29 +46,43 @@ hub: Istanbul 880 620 [color=istanbul max_drones=4]
 # Western departures
 connection: Lisbon-Madrid [max_link_capacity=3 distance=300km]
 connection: Madrid-Paris [distance=800km]
-connection: Madrid-Geneva [distance=1000km]
+connection: Madrid-Zurich [distance=1000km]
+connection: Madrid-Barcelona [distance=600km]
+connection: Barcelona-Paris [distance=1000km]
+connection: Barcelona-Rome [distance=1300km]
 
 # The Channel & North Sea
 connection: Paris-London [distance=350km]
 connection: Paris-Brussels [distance=300km]
 connection: London-Brussels [distance=350km]
 connection: London-Oslo [distance=1200km]
+connection: London-Amsterdam [distance=350km]
+connection: Amsterdam-Brussels [distance=200km]
+connection: Amsterdam-Berlin [distance=650km]
+
+# Scandinavia & Baltic ties
+connection: Oslo-Stockholm [distance=500km]
+connection: Stockholm-Helsinki [distance=400km]
+connection: Stockholm-Berlin [distance=1000km]
+connection: Helsinki-Warsaw [distance=950km]
 
 # Central Europe
 connection: Brussels-Berlin [distance=800km]
 connection: Berlin-Prague [distance=350km]
 connection: Prague-Vienna [distance=300km]
-connection: Vienna-Geneva [distance=700km]
+connection: Vienna-Zurich [distance=700km]
+connection: Vienna-Budapest [distance=250km]
 
 # Eastern Europe
 connection: Warsaw-Kyiv [distance=800km]
 connection: Kyiv-Bucharest [distance=900km]
 connection: Bucharest-Istanbul [distance=600km]
+connection: Budapest-Bucharest [distance=800km]
+connection: Budapest-Kyiv [distance=1100km]
 
-# Southern Europe
+# Southern Europe & Cross-Continental ties
 connection: Rome-Athens [distance=1100km]
 connection: Athens-Istanbul [distance=800km]
-
 connection: Berlin-Warsaw [distance=550km]
 connection: Vienna-Rome [distance=1100km]
-connection: Geneva-Rome [distance=900km]
+connection: Zurich-Rome [distance=900km]

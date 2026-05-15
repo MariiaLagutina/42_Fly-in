@@ -24,16 +24,11 @@ def run_pygame_airlines(visualizer: PygameAirlinesVisualizer) -> None:
     pygame.display.set_caption("Fly-in: Global Logistics")
     clock = pygame.time.Clock()
 
-    # --- УМНАЯ ЗАГРУЗКА ФОНА ---
-    bg_image_name = "germany.png"  # По умолчанию
-    
-    # Проверяем, какая карта указана в аргументах запуска
+    bg_image_name = "germany.png"
+
     for arg in sys.argv:
-        if "maps/bonus/europa_map.txt" in arg.lower():
+        if "europa" in arg.lower():
             bg_image_name = "europa.png"
-        elif "world_map.txt" in arg.lower():
-            bg_image_name = "world.png"
-    
     try:
         bg_image = pygame.image.load(bg_image_name)
         bg_image = pygame.transform.scale(bg_image, (width, height))
@@ -41,13 +36,12 @@ def run_pygame_airlines(visualizer: PygameAirlinesVisualizer) -> None:
         print(f"Warning: {bg_image_name} not found! Using solid background.")
         bg_image = None
 
-    # Загружаем шрифты для названий городов и дашборда
     city_font = pygame.font.SysFont("Arial", 16, bold=True)
     dashboard_font = pygame.font.SysFont("Courier", 14, bold=True)
 
-    # Таймер
+
     last_update_time = pygame.time.get_ticks()
-    turn_delay = 500  # 0.5 сек на ход
+    turn_delay = 500
     current_event_index = 0
 
     running = True
@@ -58,9 +52,8 @@ def run_pygame_airlines(visualizer: PygameAirlinesVisualizer) -> None:
             if event.type == pygame.QUIT:
                 running = False
             elif event.type == pygame.MOUSEBUTTONDOWN:
-                print(f"Координаты для карты: {event.pos[0]} {event.pos[1]}")
+                print(f"Coordinates: {event.pos[0]} {event.pos[1]}")
 
-        # Плеер событий
         if current_time - last_update_time > turn_delay:
             if current_event_index < len(visualizer.event_queue):
                 sim_event = visualizer.event_queue[current_event_index]
@@ -75,35 +68,33 @@ def run_pygame_airlines(visualizer: PygameAirlinesVisualizer) -> None:
                 current_event_index += 1
                 last_update_time = current_time
 
-        # --- НОВОЕ: Рисуем фон (карту или синий цвет) ---
         if bg_image:
-            screen.blit(bg_image, (0, 0)) # Рисуем картинку
+            screen.blit(bg_image, (0, 0))
         else:
-            screen.fill((20, 30, 50))     # Запасной цвет
+            screen.fill((20, 30, 50))
 
-        # 1. Рисуем линии маршрутов
         for conn in visualizer.graph.connections:
             start_pos = (conn.zone_a.x, conn.zone_a.y)
             end_pos = (conn.zone_b.x, conn.zone_b.y)
             condition = visualizer.connection_weather.get(conn.name(), "clear")
 
             if condition == "storm":
-                color, thickness = (255, 50, 50), 4
+                color, thickness = (255, 50, 50), 5
             elif condition == "snow":
-                color, thickness = (200, 200, 255), 4
+                color, thickness = (200, 200, 255), 5
             elif condition == "rain":
-                color, thickness = (50, 100, 255), 3
+                color, thickness = (50, 100, 255), 4
             elif condition == "tailwind":
-                color, thickness = (50, 255, 150), 3
+                color, thickness = (50, 255, 150), 4
             else:
-                color, thickness = (100, 100, 100), 2
+                color, thickness = (200, 200, 200), 3
 
             pygame.draw.line(screen, color, start_pos, end_pos, thickness)
 
         # 2. Рисуем города и названия
         for zone in visualizer.graph.zones.values():
             node_color = (50, 255, 50) if zone.is_start or zone.is_end else (100, 200, 255)
-            pygame.draw.circle(screen, node_color, (zone.x, zone.y), 8)
+            pygame.draw.circle(screen, node_color, (zone.x, zone.y), 10)
 
             # --- НОВОЕ: Пишем названия городов ---
             # Создаем черную тень текста, чтобы он читался поверх светлых участков карты
