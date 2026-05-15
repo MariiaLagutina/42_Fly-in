@@ -21,7 +21,12 @@ def main() -> None:
 
     dispatcher = (
         EventDispatcher()
-        if args.airlines or args.pygame_airlines or args.capacity_info
+        if (
+            args.airlines
+            or args.pygame
+            or args.pygame_airlines
+            or args.capacity_info
+        )
         else None
     )
     airlines_visualizer = AirlinesVisualizer() if args.airlines else None
@@ -34,13 +39,21 @@ def main() -> None:
     if dispatcher is not None and capacity_visualizer is not None:
         dispatcher.add_listener(capacity_visualizer)
 
-    pygame_visualizer = None
+    standard_visualizer = None
+    if args.pygame:
+        from pygame_standard import PygameStandardVisualizer
+
+        standard_visualizer = PygameStandardVisualizer(graph, nb_drones)
+        if dispatcher is not None:
+            dispatcher.add_listener(standard_visualizer)
+
+    airlines_pygame_visualizer = None
     if args.pygame_airlines:
         from pygame_airlines import PygameAirlinesVisualizer
 
-        pygame_visualizer = PygameAirlinesVisualizer(graph)
+        airlines_pygame_visualizer = PygameAirlinesVisualizer(graph)
         if dispatcher is not None:
-            dispatcher.add_listener(pygame_visualizer)
+            dispatcher.add_listener(airlines_pygame_visualizer)
 
     simulator = Simulator(
         graph,
@@ -50,10 +63,16 @@ def main() -> None:
     )
     turns = simulator.run()
 
-    if pygame_visualizer is not None:
+    if standard_visualizer is not None:
+        from pygame_standard import run_pygame_standard
+
+        run_pygame_standard(standard_visualizer)
+        return
+
+    if airlines_pygame_visualizer is not None:
         from pygame_airlines import run_pygame_airlines
 
-        run_pygame_airlines(pygame_visualizer)
+        run_pygame_airlines(airlines_pygame_visualizer)
         return
 
     if airlines_visualizer is not None:
@@ -89,6 +108,11 @@ def _parse_args() -> argparse.Namespace:
         "--airlines",
         action="store_true",
         help="Use aviation-themed presentation output",
+    )
+    parser.add_argument(
+        "--pygame",
+        action="store_true",
+        help="Open the standard Pygame turn viewer",
     )
     parser.add_argument(
         "--pygame-airlines",

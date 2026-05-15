@@ -1,3 +1,4 @@
+_This project has been created as part of the 42 curriculum by mlagutin._
 # Fly-in
 
 Fly-in is an autonomous drone routing simulator. It parses a map of hubs,
@@ -37,13 +38,22 @@ Useful flags:
 - `--visual`: colorizes strict simulation output using zone metadata.
 - `--airlines`: prints a more descriptive aviation-style event log.
 - `--capacity-info`: prints live zone and connection usage after each turn.
+- `--pygame`: opens the standard graph viewer for any map.
 - `--pygame-airlines`: opens the optional Pygame visualizer.
 
 Example:
 
 ```sh
 python3 main.py maps/easy/03_basic_capacity.txt --capacity-info
+python3 main.py maps/easy/02_simple_fork.txt --pygame
 ```
+
+The standard Pygame viewer auto-plays the simulation once, then keeps the final
+state open for turn-by-turn review. Press `A` to move to the previous turn,
+`D` to move to the next turn, and `Space` to resume or pause autoplay. The
+top bar shows the movements that happened in the selected turn. The viewer
+keeps a wide layout for larger standard maps and shortens long zone labels when
+needed so the graph stays readable.
 
 ## Map Format
 

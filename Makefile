@@ -1,5 +1,6 @@
 PY_FILES = main.py simulation.py pathfinder.py parser.py graph.py zone.py \
-	connection.py drone.py events.py visualizers.py pygame_airlines.py weather.py
+	connection.py drone.py events.py visualizers.py pygame_standard.py \
+	pygame_airlines.py weather.py
 
 install:
 	uv venv
@@ -9,6 +10,9 @@ run:
 	uv run python3 main.py $(MAP)
 
 run-pygame:
+	uv run python3 main.py $(MAP) --pygame
+
+run-pygame-airlines:
 	uv run python3 main.py $(MAP) --pygame-airlines
 
 debug:
