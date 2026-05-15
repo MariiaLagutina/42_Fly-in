@@ -51,6 +51,8 @@ def run_pygame_airlines(visualizer: PygameAirlinesVisualizer) -> None:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                print(f"Координаты для карты: {event.pos[0]} {event.pos[1]}")
 
         # Плеер событий
         if current_time - last_update_time > turn_delay:
