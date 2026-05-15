@@ -40,6 +40,16 @@ def run_pygame_airlines(visualizer: PygameAirlinesVisualizer) -> None:
     dashboard_font = pygame.font.SysFont("Courier", 14, bold=True)
 
 
+    icons = {}
+    try:
+        icons["storm"] = pygame.transform.scale(pygame.image.load("storm.png"), (30, 30))
+        icons["rain"] = pygame.transform.scale(pygame.image.load("rain.png"), (30, 30))
+        icons["snow"] = pygame.transform.scale(pygame.image.load("snow.png"), (30, 30))
+        icons["tailwind"] = pygame.transform.scale(pygame.image.load("sun.png"), (30, 30))
+    except FileNotFoundError:
+        print("Warning: Weather icons not found! Make sure storm.png, rain.png, etc. are in the folder.")
+
+
     last_update_time = pygame.time.get_ticks()
     turn_delay = 500
     current_event_index = 0
@@ -90,6 +100,12 @@ def run_pygame_airlines(visualizer: PygameAirlinesVisualizer) -> None:
                 color, thickness = (200, 200, 200), 3
 
             pygame.draw.line(screen, color, start_pos, end_pos, thickness)
+
+            if condition in icons:
+                    mid_x = (start_pos[0] + end_pos[0]) // 2
+                    mid_y = (start_pos[1] + end_pos[1]) // 2
+                    icon_rect = icons[condition].get_rect(center=(mid_x, mid_y))
+                    screen.blit(icons[condition], icon_rect)
 
         # 2. Рисуем города и названия
         for zone in visualizer.graph.zones.values():

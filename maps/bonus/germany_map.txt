@@ -4,7 +4,7 @@
 nb_drones: 10
 
 # --- NORTH ---
-hub: Kiel 450 100 [color=kiel max_drones=2]
+start_hub: Kiel 450 100 [color=kiel max_drones=10]
 hub: Hamburg 470 190 [zone=priority color=hamburg max_drones=3]
 hub: Schwerin 570 180 [color=schwerin]
 hub: Bremen 380 230 [color=bremen]
@@ -19,7 +19,7 @@ hub: Erfurt 540 440 [color=erfurt]
 # --- WEST & CENTRAL ---
 hub: Hanover 450 300 [color=hanover max_drones=2]
 hub: Dusseldorf 250 400 [color=dusseldorf max_drones=3]
-start_hub: Frankfurt 370 510 [color=frankfurt max_drones=10]
+hub: Frankfurt 370 510 [color=frankfurt max_drones=10]
 hub: Mainz 330 530 [color=mainz]
 
 # --- SOUTH & SOUTHWEST ---
@@ -28,7 +28,7 @@ hub: Stuttgart 410 630 [color=stuttgart max_drones=3]
 end_hub: Munich 560 690 [color=munich max_drones=10]
 
 # === FLIGHT ROUTES ===
-# From start hub (Frankfurt)
+# From old start hub (Frankfurt)
 connection: Frankfurt-Mainz [distance=50km]
 connection: Frankfurt-Dusseldorf [distance=200km]
 connection: Frankfurt-Stuttgart
@@ -47,6 +47,7 @@ connection: Magdeburg-Potsdam
 connection: Potsdam-Berlin
 connection: Berlin-Dresden
 connection: Dresden-Erfurt
+connection: Munich-Dresden
 
 # Southern routes
 connection: Dusseldorf-Saarbrucken
@@ -54,3 +55,16 @@ connection: Saarbrucken-Stuttgart [max_link_capacity=2]
 connection: Stuttgart-Munich [max_link_capacity=3]
 connection: Erfurt-Munich
 connection: Frankfurt-Munich [max_link_capacity=2]
+
+# --- New Cross-Country Routes ---
+# Connecting North and West
+connection: Bremen-Dusseldorf [distance=250km]
+connection: Dusseldorf-Hanover [distance=250km]
+
+# Main North-East Corridor
+connection: Hamburg-Berlin [distance=280km]
+
+# Central Crossroads
+connection: Hanover-Erfurt [distance=200km]
+connection: Frankfurt-Erfurt [distance=200km]
+connection: Mainz-Saarbrucken [distance=130km]
