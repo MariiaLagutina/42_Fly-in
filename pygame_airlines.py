@@ -75,10 +75,10 @@ def run_pygame_airlines(visualizer: PygameAirlinesVisualizer) -> None:
                 current_event_index += 1
                 last_update_time = current_time
 
+        screen.fill((20, 30, 50))
+        
         if bg_image:
             screen.blit(bg_image, (0, 0))
-        else:
-            screen.fill((20, 30, 50))
 
         _draw_graph(screen, visualizer, icons, city_font)
         _draw_drones(screen, visualizer)

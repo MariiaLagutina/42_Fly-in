@@ -32,7 +32,6 @@ end_hub: Munich 560 690 [color=munich max_drones=10]
 connection: Frankfurt-Mainz [distance=50km]
 connection: Frankfurt-Dusseldorf [distance=200km]
 connection: Frankfurt-Stuttgart
-connection: Frankfurt-Saarbrucken
 
 # Northern routes
 connection: Hanover-Bremen
