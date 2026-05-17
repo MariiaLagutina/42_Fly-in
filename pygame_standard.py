@@ -82,6 +82,30 @@ class PygameStandardVisualizer(EventListener):
 class DroneSimulationWindow:
     """Main pygame window for drone simulation visualization."""
 
+    MAP_ZONE_COLORS = {
+        # Base Colors (Easy / Medium / Hard 1)
+        "green": (46, 204, 113),
+        "blue": (52, 152, 219),
+        "red": (231, 76, 60),
+        "yellow": (241, 196, 15),
+        "orange": (230, 126, 34),
+        "cyan": (0, 188, 212),
+        
+        # Colors (Hard 3: Ultimate)
+        "purple": (155, 89, 182),
+        "brown": (145, 100, 70),
+        "lime": (145, 220, 35),
+        "magenta": (240, 30, 240),
+        "gold": (245, 190, 25),
+        
+        # Extreme Colors (Challenger: Impossible Dream)
+        "black": (42, 46, 54),       # Deep black
+        "maroon": (115, 35, 35),      # Burgundy
+        "darkred": (145, 20, 20),     # Deep red
+        "violet": (180, 120, 245),    # Violet
+        "crimson": (220, 20, 60),     # Crimson/Pink
+    }
+
     def __init__(
         self,
         visualizer: PygameStandardVisualizer,
@@ -152,25 +176,42 @@ class DroneSimulationWindow:
         return positions
 
     def _get_short_name(self, name: str) -> str:
+        """Smart name shortener that preserves trailing numbers and formats nicely."""
         readable = name.replace("_", " ").title()
-        if len(readable) > 12:
-            return readable[:10] + ".."
+        if len(readable) > 11:
+            # Preserve trailing digits such as "1", "5", or "12".
+            suffix = ""
+            main_part = readable
+            while main_part and main_part[-1].isdigit():
+                suffix = main_part[-1] + suffix
+                main_part = main_part[:-1]
+            
+            main_part = main_part.strip()
+            words = main_part.split()
+            
+            # Keep the first word and abbreviate the second one when present.
+            if len(words) > 1:
+                short_main = f"{words[0]} {words[1][0]}."
+            else:
+                short_main = main_part[:7] + ".."
+                
+            return f"{short_main}{suffix}"
         return readable
 
     def _get_zone_color(self, zone: Zone) -> tuple[int, int, int]:
         """Get RGB color for a zone based on its properties."""
-        if zone.color == "red":
-            return (231, 76, 60)
-        if zone.color == "blue":
-            return (52, 152, 219)
-        if zone.color == "green":
-            return (46, 204, 113)
-        if zone.color == "yellow":
-            return (241, 196, 15)
-        if zone.color == "cyan":
-            return (0, 188, 212)
-        if zone.color == "orange":
-            return (230, 126, 34)
+        if zone.color == "rainbow":
+            import time
+            import math
+            frequency = 3.5
+            current_tick = time.time() * frequency
+            r = int((math.sin(current_tick) + 1) * 127.5)
+            g = int((math.sin(current_tick + 2) + 1) * 127.5)
+            b = int((math.sin(current_tick + 4) + 1) * 127.5)
+            return (r, g, b)
+
+        if zone.color in self.MAP_ZONE_COLORS:
+            return self.MAP_ZONE_COLORS[zone.color]
 
         if zone.is_start:
             return (39, 174, 96)
@@ -182,6 +223,7 @@ class DroneSimulationWindow:
             return (155, 89, 182)
         if zone.zone_type == ZoneType.BLOCKED:
             return (127, 140, 141)
+            
         return (220, 225, 230)
 
     def _draw_history_bar(self, frame: StandardTurnFrame) -> None:
@@ -322,6 +364,17 @@ class DroneSimulationWindow:
                 thickness,
             )
 
+        is_challenger = "impossible_goal" in self.graph.zones
+
+        row_label_indices: dict[str, int] = {}
+        rows: dict[int, list[Zone]] = {}
+        for zone in self.graph.zones.values():
+            rows.setdefault(zone.y, []).append(zone)
+
+        for row_zones in rows.values():
+            for row_idx, zone in enumerate(sorted(row_zones, key=lambda item: item.x)):
+                row_label_indices[zone.name] = row_idx
+
         for zone in self.graph.zones.values():
             pos = self.node_positions[zone.name]
             color = self._get_zone_color(zone)
@@ -332,14 +385,25 @@ class DroneSimulationWindow:
             short_title = self._get_short_name(zone.name)
             label = self.node_font.render(short_title, True, (45, 55, 72))
 
+            row_idx = row_label_indices[zone.name]
+            if row_idx % 2 == 0:
+                y_offset = -35
+                bg_y_offset = -37
+            else:
+                y_offset = 22
+                bg_y_offset = 20
+
             text_bg_rect = pygame.Rect(
-                pos[0] - label.get_width() // 2 - 6,
-                pos[1] - 37,
-                label.get_width() + 12,
+                pos[0] - label.get_width() // 2 - 4,
+                pos[1] + bg_y_offset,
+                label.get_width() + 8,
                 label.get_height() + 2,
             )
             pygame.draw.rect(
-                self.screen, (255, 255, 255), text_bg_rect, border_radius=4
+                self.screen,
+                (255, 255, 255),
+                text_bg_rect,
+                border_radius=4,
             )
             pygame.draw.rect(
                 self.screen,
@@ -348,9 +412,9 @@ class DroneSimulationWindow:
                 width=1,
                 border_radius=4,
             )
-
             self.screen.blit(
-                label, (pos[0] - label.get_width() // 2, pos[1] - 35)
+                label,
+                (pos[0] - label.get_width() // 2, pos[1] + y_offset),
             )
 
         drone_groups: dict[tuple[int, int], list[str]] = {}
@@ -395,6 +459,17 @@ class DroneSimulationWindow:
                     badge_pos[1] - count_surface.get_height() // 2 - 1,
                 )
                 self.screen.blit(count_surface, blit_pos)
+
+        if is_challenger:
+            hint_font = pygame.font.SysFont("Arial", 13, italic=True)
+            hint_surf = hint_font.render(
+                "Use the move tracker above.",
+                True,
+                (55, 65, 80),
+            )
+            hint_x = (self.screen.get_width() - hint_surf.get_width()) // 2
+            hint_y = self.screen.get_height() - 25
+            self.screen.blit(hint_surf, (hint_x, hint_y))
 
     def run_loop(self) -> None:
         """Main event loop for simulation playback."""
