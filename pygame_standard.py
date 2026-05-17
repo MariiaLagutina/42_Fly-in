@@ -90,20 +90,18 @@ class DroneSimulationWindow:
         "yellow": (241, 196, 15),
         "orange": (230, 126, 34),
         "cyan": (0, 188, 212),
-        
         # Colors (Hard 3: Ultimate)
         "purple": (155, 89, 182),
         "brown": (145, 100, 70),
         "lime": (145, 220, 35),
         "magenta": (240, 30, 240),
         "gold": (245, 190, 25),
-        
         # Extreme Colors (Challenger: Impossible Dream)
-        "black": (42, 46, 54),       # Deep black
-        "maroon": (115, 35, 35),      # Burgundy
-        "darkred": (145, 20, 20),     # Deep red
-        "violet": (180, 120, 245),    # Violet
-        "crimson": (220, 20, 60),     # Crimson/Pink
+        "black": (42, 46, 54),  # Deep black
+        "maroon": (115, 35, 35),  # Burgundy
+        "darkred": (145, 20, 20),  # Deep red
+        "violet": (180, 120, 245),  # Violet
+        "crimson": (220, 20, 60),  # Crimson/Pink
     }
 
     def __init__(
@@ -112,8 +110,7 @@ class DroneSimulationWindow:
         width: int = 1200,
         height: int = 800,
     ) -> None:
-        """Initialize pygame window and layout parameters.
-        """
+        """Initialize pygame window and layout parameters."""
         pygame.init()
         self.visualizer = visualizer
         self.frames = visualizer.build_frames()
@@ -163,20 +160,16 @@ class DroneSimulationWindow:
             norm_x = (zone.x - min_x) / range_x
             norm_y = (zone.y - min_y) / range_y
             screen_x = int(
-                self.viewport.left
-                + (norm_x * (self.viewport.width - 60))
-                + 30
+                self.viewport.left + (norm_x * (self.viewport.width - 60)) + 30
             )
             screen_y = int(
-                self.viewport.top
-                + (norm_y * (self.viewport.height - 60))
-                + 30
+                self.viewport.top + (norm_y * (self.viewport.height - 60)) + 30
             )
             positions[zone.name] = (screen_x, screen_y)
         return positions
 
     def _get_short_name(self, name: str) -> str:
-        """Smart name shortener that preserves trailing numbers and formats nicely."""
+        """Shorten names while preserving trailing numbers."""
         readable = name.replace("_", " ").title()
         if len(readable) > 11:
             # Preserve trailing digits such as "1", "5", or "12".
@@ -185,16 +178,16 @@ class DroneSimulationWindow:
             while main_part and main_part[-1].isdigit():
                 suffix = main_part[-1] + suffix
                 main_part = main_part[:-1]
-            
+
             main_part = main_part.strip()
             words = main_part.split()
-            
+
             # Keep the first word and abbreviate the second one when present.
             if len(words) > 1:
                 short_main = f"{words[0]} {words[1][0]}."
             else:
                 short_main = main_part[:7] + ".."
-                
+
             return f"{short_main}{suffix}"
         return readable
 
@@ -203,6 +196,7 @@ class DroneSimulationWindow:
         if zone.color == "rainbow":
             import time
             import math
+
             frequency = 3.5
             current_tick = time.time() * frequency
             r = int((math.sin(current_tick) + 1) * 127.5)
@@ -223,7 +217,7 @@ class DroneSimulationWindow:
             return (155, 89, 182)
         if zone.zone_type == ZoneType.BLOCKED:
             return (127, 140, 141)
-            
+
         return (220, 225, 230)
 
     def _draw_history_bar(self, frame: StandardTurnFrame) -> None:
@@ -251,9 +245,7 @@ class DroneSimulationWindow:
         status_x = 25 + turn_surface.get_width() + 15
         self.screen.blit(status_surface, (status_x, 20))
 
-        hint_str = (
-            "(Space: Auto/Pause | Left/Right: Step | R: Reset)"
-        )
+        hint_str = "(Space: Auto/Pause | Left/Right: Step | R: Reset)"
         hint_surface = self.node_font.render(hint_str, True, (140, 152, 168))
         self.screen.blit(hint_surface, (25, 48))
 
@@ -314,13 +306,15 @@ class DroneSimulationWindow:
                 )
                 active_connections.add(c_id)
 
-        path_counts = {}
+        path_counts: dict[tuple[str, str], int] = {}
 
         for conn in self.graph.connections:
             p1 = self.node_positions[conn.zone_a.name]
             p2 = self.node_positions[conn.zone_b.name]
 
             path_id = tuple(sorted([conn.zone_a.name, conn.zone_b.name]))
+            if not isinstance(path_id, tuple) or len(path_id) != 2:
+                raise TypeError("path_id must be a tuple of two strings")
             count = path_counts.get(path_id, 0)
             path_counts[path_id] = count + 1
 
@@ -333,6 +327,7 @@ class DroneSimulationWindow:
 
             if count > 0:
                 import math
+
                 dx = p2[0] - p1[0]
                 dy = p2[1] - p1[1]
                 dist = math.hypot(dx, dy)
@@ -372,7 +367,9 @@ class DroneSimulationWindow:
             rows.setdefault(zone.y, []).append(zone)
 
         for row_zones in rows.values():
-            for row_idx, zone in enumerate(sorted(row_zones, key=lambda item: item.x)):
+            for row_idx, zone in enumerate(
+                sorted(row_zones, key=lambda item: item.x)
+            ):
                 row_label_indices[zone.name] = row_idx
 
         for zone in self.graph.zones.values():
@@ -418,7 +415,7 @@ class DroneSimulationWindow:
             )
 
         drone_groups: dict[tuple[int, int], list[str]] = {}
-        for label, pos_info in frame.positions.items():
+        for drone_label, pos_info in frame.positions.items():
             p_start = self.node_positions[pos_info.first_zone]
             if pos_info.kind == "zone" or pos_info.second_zone is None:
                 target_point = p_start
@@ -428,7 +425,13 @@ class DroneSimulationWindow:
                     (p_start[0] + p_end[0]) // 2,
                     (p_start[1] + p_end[1]) // 2,
                 )
-            drone_groups.setdefault(target_point, []).append(label)
+            # Keep labels as strings so they match the expected type.
+            if not isinstance(drone_label, str):
+                raise TypeError(
+                    f"Expected label to be a string, "
+                    f"got {type(drone_label)}"
+                )
+            drone_groups.setdefault(target_point, []).append(drone_label)
 
         for point, labels in drone_groups.items():
             count = len(labels)

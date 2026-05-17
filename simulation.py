@@ -1,5 +1,11 @@
+import math
+
 from connection import Connection
 from drone import Drone, DroneState
+from graph import Graph
+from pathfinder import Pathfinder
+from zone import Zone
+from weather import WeatherSystem
 from events import (
     AgentMoved,
     AgentRefueling,
@@ -9,10 +15,6 @@ from events import (
     TurnFinished,
     TurnStarted,
 )
-from graph import Graph
-from pathfinder import Pathfinder
-from zone import Zone
-from weather import WeatherSystem
 
 
 class SimulationTurn:
@@ -63,6 +65,7 @@ class Simulator:
         reservations: dict[tuple[str, int], int] = {}
         conn_reserv: dict[tuple[str, int], int] = {}
         global_usage: dict[str, int] = {}
+
         for drone in self.drones:
             path = self.pathfinder.find_cooperative_path(
                 self.graph.start_zone,
@@ -76,23 +79,49 @@ class Simulator:
             t = 0
             for i in range(len(path) - 1):
                 z_curr, z_next = path[i], path[i + 1]
-                cost = 1 if z_next == z_curr else z_next.movement_cost()
+
+                if z_next == z_curr:
+                    cost = 1
+                else:
+                    conn = self.graph.get_connection(z_curr, z_next)
+                    if conn and conn.distance > 0:
+                        if conn.distance < 200:
+                            cost = math.ceil(conn.distance / 100.0)
+                            if self.enable_dynamic_weather:
+                                if conn.weather_condition in ("storm", "snow"):
+                                    cost += 2
+                                elif conn.weather_condition == "rain":
+                                    cost += 1
+                            cost = max(1, cost)
+                        else:
+                            eff_dist = float(conn.distance)
+                            if (
+                                self.enable_dynamic_weather
+                                and conn.weather_condition == "tailwind"
+                            ):
+                                eff_dist /= 2.0
+                            cost = max(1, math.ceil(eff_dist / 400.0))
+                    else:
+                        cost = z_next.movement_cost()
 
                 if z_next != z_curr:
                     conn = self.graph.get_connection(z_curr, z_next)
                     if conn:
-                        conn_reserv[(conn.name(), t)] = (
-                            conn_reserv.get((conn.name(), t), 0) + 1
-                        )
+                        if conn.distance > 0:
+                            conn_reserv[(f"{conn.name()}_dept", t)] = 1
+                        for tau in range(t, t + cost):
+                            conn_reserv[(conn.name(), tau)] = (
+                                conn_reserv.get((conn.name(), tau), 0) + 1
+                            )
 
                 t += cost
                 if not z_next.is_start and not z_next.is_end:
-                    reservations[(z_next.name, t)] = (
-                        reservations.get((z_next.name, t), 0) + 1
-                    )
-                    global_usage[z_next.name] = (
-                        global_usage.get(z_next.name, 0) + 1
-                    )
+                    reservations[(z_next.name, t)] = reservations.get(
+                        (z_next.name, t), 0
+                    ) + 1
+                    global_usage[z_next.name] = global_usage.get(
+                        z_next.name, 0
+                    ) + 1
 
     def _path_cost(self, path: list[Zone]) -> int:
         return sum(zone.movement_cost() for zone in path[1:])
@@ -117,10 +146,12 @@ class Simulator:
         self._emit(TurnStarted(turn_number))
         if self.enable_dynamic_weather:
             self.weather_system.update_weather(turn_number)
+
         zone_occupancy = self._count_zone_occupancy()
         connection_usage = self._count_active_connection_usage()
         moved_drone_ids: set[int] = set()
         planned_moves: list[tuple[Drone, Connection]] = []
+        departed_this_turn: set[str] = set()
 
         for drone in self.drones:
             if drone.state != DroneState.IN_TRANSIT:
@@ -176,8 +207,7 @@ class Simulator:
                 continue
 
             connection = self.graph.get_connection(
-                drone.current_zone,
-                next_zone,
+                drone.current_zone, next_zone
             )
             if connection is None or not connection.is_open:
                 continue
@@ -187,7 +217,12 @@ class Simulator:
             if used >= connection.max_link_capacity:
                 continue
 
+            if connection.distance > 0 and conn_name in departed_this_turn:
+                continue
+
             connection_usage[conn_name] = used + 1
+            if connection.distance > 0:
+                departed_this_turn.add(conn_name)
             planned_moves.append((drone, connection))
 
         outgoing_counts: dict[str, int] = {}
@@ -210,7 +245,6 @@ class Simulator:
                 continue
 
             zone_occupancy[drone.current_zone.name] -= 1
-
             transit_time = self._calculate_transit_time(next_zone, connection)
             conn_name = connection.name()
 
@@ -220,7 +254,6 @@ class Simulator:
                 drone.state = DroneState.IN_TRANSIT
                 drone.transit_target = next_zone
                 drone.transit_connection_name = conn_name
-
                 drone.transit_turns_left = transit_time - 1
 
                 turn.add_movement(drone.label, conn_name)
@@ -262,19 +295,32 @@ class Simulator:
 
         self._emit(TurnFinished(turn_number, tuple(turn.movements)))
         self._emit_capacity_snapshot(
-            turn_number,
-            zone_occupancy,
-            connection_usage,
+            turn_number, zone_occupancy, connection_usage
         )
         return turn
 
     def _calculate_transit_time(
-        self,
-        next_zone: Zone,
-        connection: Connection,
+        self, next_zone: Zone, connection: Connection
     ) -> int:
-        base_time = next_zone.movement_cost()
+        if connection.distance > 0:
+            if connection.distance < 200:
+                base_turns = math.ceil(connection.distance / 100.0)
+                if self.enable_dynamic_weather:
+                    if connection.weather_condition in ("storm", "snow"):
+                        base_turns += 2
+                    elif connection.weather_condition == "rain":
+                        base_turns += 1
+                return max(1, base_turns)
 
+            eff_distance = float(connection.distance)
+            if (
+                self.enable_dynamic_weather
+                and connection.weather_condition == "tailwind"
+            ):
+                eff_distance /= 2.0
+            return max(1, math.ceil(eff_distance / 400.0))
+
+        base_time = next_zone.movement_cost()
         if not self.enable_dynamic_weather:
             return base_time
 
@@ -291,14 +337,11 @@ class Simulator:
 
     def _count_zone_occupancy(self) -> dict[str, int]:
         zone_occupancy: dict[str, int] = {}
-
         for drone in self.drones:
             if drone.is_delivered() or drone.state == DroneState.IN_TRANSIT:
                 continue
-
             name = drone.current_zone.name
             zone_occupancy[name] = zone_occupancy.get(name, 0) + 1
-
         return zone_occupancy
 
     def _count_active_connection_usage(self) -> dict[str, int]:
@@ -350,7 +393,6 @@ class Simulator:
         print(f"Total turns: {len(self.turns)}")
         for drone in self.drones:
             print(
-                f"{drone.label}: "
-                f"Path length={len(drone.path)}, "
+                f"{drone.label}: Path length={len(drone.path)}, "
                 f"Delivered={drone.is_delivered()}"
             )

@@ -17,6 +17,8 @@ class Connection:
         self.current_drones = 0
         self.is_open: bool = True
         self.weather_condition: str = "clear"
+        self.distance: int = 0
+        self.explicit_max_link_capacity: bool = False
 
     def connects(self, zone: "Zone") -> bool:
         return zone == self.zone_a or zone == self.zone_b

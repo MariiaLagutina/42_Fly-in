@@ -4,54 +4,59 @@
 nb_drones: 15
 
 # --- IBERIAN PENINSULA (START) ---
-start_hub: Lisbon 100 600 [color=lisbon max_drones=15]
-hub: Madrid 190 590 [color=madrid max_drones=4]
-hub: Barcelona 270 590 [color=barcelona max_drones=3]
+hub: Lisbon 100 600 [color=lisbon max_drones=15 population=505000]
+hub: Madrid 190 590 [color=madrid population=3223000]
+hub: Barcelona 270 590 [color=barcelona population=1620000]
 
 # --- WESTERN EUROPE ---
-hub: Paris 300 460 [zone=priority color=paris max_drones=4]
-hub: London 270 390 [color=london max_drones=3]
-hub: Amsterdam 350 390 [color=amsterdam]
+hub: Paris 300 460 [zone=priority color=paris population=2161000]
+start_hub: Reykjavik 160 120 [color=reykjavik max_drones=15 population=139000]
+hub: London 270 390 [color=london population=8982000]
+hub: Dublin 210 360 [color=dublin population=554000]
+hub: Amsterdam 350 390 [color=amsterdam population=821000]
 
 # --- THE ALPS (BOTTLENECK) ---
 # Crossing the Alps is slow (restricted) and has low capacity
-hub: Zurich 380 490 [zone=restricted color=zurich max_drones=2]
-hub: Milan 390 520 [zone=restricted color=milan max_drones=2]
+hub: Zurich 380 490 [zone=restricted color=zurich population=415000]
+hub: Milan 390 520 [zone=restricted color=milan population=1352000]
 
 # --- CENTRAL & NORTHERN EUROPE ---
-hub: Brussels 340 420 [color=brussels]
-hub: Berlin 440 400 [zone=priority color=berlin max_drones=5]
-hub: Prague 460 440 [color=prague]
-hub: Vienna 480 470 [color=vienna max_drones=3]
-hub: Budapest 530 480 [color=budapest]
+hub: Brussels 340 420 [color=brussels population=1208000]
+hub: Berlin 440 400 [zone=priority color=berlin population=3645000]
+hub: Prague 460 440 [color=prague population=1309000]
+hub: Vienna 480 470 [color=vienna population=1897000]
+hub: Budapest 530 480 [color=budapest population=1752000]
 
 # --- SCANDINAVIA ---
-hub: Oslo 420 250 [color=oslo]
-hub: Stockholm 490 270 [color=stockholm]
-hub: Helsinki 540 250 [color=helsinki]
+hub: Oslo 420 250 [color=oslo population=634000]
+hub: Stockholm 490 270 [color=stockholm population=975000]
+hub: Helsinki 540 250 [color=helsinki population=631000]
 
 # --- EASTERN EUROPE ---
-hub: Warsaw 530 390 [color=warsaw max_drones=3]
-hub: Kyiv 660 420 [color=kyiv max_drones=3]
-hub: Bucharest 630 520 [color=bucharest max_drones=3]
+hub: Warsaw 530 390 [color=warsaw population=1765000]
+hub: Kyiv 660 420 [color=kyiv population=2884000]
+hub: Bucharest 630 520 [color=bucharest population=1836000]
 
 # --- SOUTHERN EUROPE & BALKANS (DESTINATION) ---
-hub: Rome 430 580 [color=rome max_drones=3]
-end_hub: Athens 610 650 [color=athens max_drones=15]
-hub: Istanbul 670 580 [color=istanbul max_drones=4]
-
+hub: Rome 430 580 [color=rome population=2873000]
+end_hub: Athens 610 650 [color=athens max_drones=15 population=3153000]
+hub: Istanbul 670 580 [color=istanbul population=15460000]
 
 # === FLIGHT ROUTES ===
 
 # Western departures
-connection: Lisbon-Madrid [max_link_capacity=3 distance=300km]
-connection: Madrid-Paris [distance=800km]
+connection: Lisbon-Madrid [max_link_capacity=3 distance=500km]
+connection: Madrid-Paris [distance=1050km]
 connection: Madrid-Zurich [distance=1000km]
 connection: Madrid-Barcelona [distance=600km]
 connection: Barcelona-Paris [distance=1000km]
 connection: Barcelona-Rome [distance=1300km]
 
 # The Channel & North Sea
+connection: Reykjavik-London [distance=1900km]
+connection: Reykjavik-Oslo [distance=1750km]
+connection: Dublin-London [distance=460km]
+connection: Dublin-Paris [distance=780km]
 connection: Paris-London [distance=350km]
 connection: Paris-Brussels [distance=300km]
 connection: London-Brussels [distance=350km]
@@ -76,7 +81,7 @@ connection: Vienna-Budapest [distance=250km]
 # Eastern Europe
 connection: Warsaw-Kyiv [distance=800km]
 connection: Kyiv-Bucharest [distance=900km]
-connection: Bucharest-Istanbul [distance=600km]
+connection: Bucharest-Istanbul [distance=450km]
 connection: Budapest-Bucharest [distance=800km]
 connection: Budapest-Kyiv [distance=1100km]
 
@@ -84,5 +89,5 @@ connection: Budapest-Kyiv [distance=1100km]
 connection: Rome-Athens [distance=1100km]
 connection: Athens-Istanbul [distance=800km]
 connection: Berlin-Warsaw [distance=550km]
-connection: Vienna-Rome [distance=1100km]
+connection: Vienna-Rome [distance=760km]
 connection: Zurich-Rome [distance=900km]

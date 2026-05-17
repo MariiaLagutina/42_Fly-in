@@ -14,11 +14,6 @@ class Pathfinder:
         self.graph = graph
 
     def find_path_bfs(self, start: Zone, end: Zone) -> list[Zone]:
-        """
-        Finds the shortest path from start to end using Breadth-First Search.
-        Used for unweighted graphs or when we want the path with
-        the fewest hops, regardless of movement cost.
-        """
         visited = set()
         queue = deque([(start, [start])])
 
@@ -40,10 +35,6 @@ class Pathfinder:
     def find_path_dijkstra(
         self, start: Zone, end: Zone
     ) -> tuple[list[Zone], float]:
-        """
-        Finds the lowest-cost path from start to end using Dijkstra's algorithm
-        Prioritizes routes based on zone types and applies traffic penalties.
-        """
         visited = set()
         counter = 0
         min_heap: list[PathHeapItem] = [(0.0, counter, start, [start])]
@@ -71,11 +62,6 @@ class Pathfinder:
     def find_multiple_paths(
         self, start: Zone, end: Zone, n: int
     ) -> list[list[Zone]]:
-        """
-        Finds up to n distinct paths from start to end using a modified
-        Dijkstra's algorithm. Paths are prioritized based on their total cost,
-        which includes zone movement costs and traffic penalties.
-        """
         if n <= 0:
             return []
 
@@ -104,8 +90,7 @@ class Pathfinder:
                 counter += 1
                 new_cost = cost + self._pathfinding_cost(neighbor)
                 heapq.heappush(
-                    min_heap,
-                    (new_cost, counter, path + [neighbor]),
+                    min_heap, (new_cost, counter, path + [neighbor])
                 )
 
         return found_paths
@@ -115,17 +100,14 @@ class Pathfinder:
         start: Zone,
         end: Zone,
         reservations: dict[tuple[str, int], int],
-        conn_reservations: dict[tuple[str, int], int],
+        conn_reserv: dict[tuple[str, int], int],
         global_usage: dict[str, int],
     ) -> list[Zone]:
-        """
-        Finds a path from start to end while considering current reservations
-        and traffic. Uses a cooperrative A* with a time component to avoid
-        zones and connections that are heavily reserved at specific times.
-        """
         visited: set[tuple[str, int]] = set()
         counter = 0
-        min_heap: list[TimedPathHeapItem] = [(0.0, counter, 0, start, [start])]
+        min_heap: list[TimedPathHeapItem] = [
+            (0.0, counter, 0, start, [start])
+        ]
 
         while min_heap:
             score, _, t, current_zone, path = heapq.heappop(min_heap)
@@ -138,18 +120,32 @@ class Pathfinder:
             if current_zone == end:
                 return path
 
-            possible_moves = []
-            for neighbor in self.graph.get_neighbors(current_zone):
-                possible_moves.append(neighbor)
-
+            possible_moves = list(self.graph.get_neighbors(current_zone))
             possible_moves.append(current_zone)
 
             for next_zone in possible_moves:
-                move_cost = (
-                    1
-                    if next_zone == current_zone
-                    else next_zone.movement_cost()
-                )
+                if next_zone == current_zone:
+                    move_cost = 1
+                else:
+                    conn = self.graph.get_connection(current_zone, next_zone)
+                    if conn and conn.distance > 0:
+                        if conn.distance < 200:
+                            # Car mode: base speed is 100 km/h.
+                            move_cost = math.ceil(conn.distance / 100.0)
+                            if conn.weather_condition in ("storm", "snow"):
+                                move_cost += 2
+                            elif conn.weather_condition == "rain":
+                                move_cost += 1
+                            move_cost = max(1, move_cost)
+                        else:
+                            # Airplane mode: base speed is 400 km/h.
+                            eff_dist = float(conn.distance)
+                            if conn.weather_condition == "tailwind":
+                                eff_dist /= 2.0
+                            move_cost = max(1, math.ceil(eff_dist / 400.0))
+                    else:
+                        move_cost = next_zone.movement_cost()
+
                 next_t = t + move_cost
                 priority_discount = (
                     0.1 if next_zone.zone_type.name == "PRIORITY" else 0.0
@@ -162,11 +158,28 @@ class Pathfinder:
                 if next_zone != current_zone:
                     conn = self.graph.get_connection(current_zone, next_zone)
                     if conn:
-                        booked_conn = conn_reservations.get(
-                            (conn.name(), t), 0
-                        )
-                        if booked_conn >= conn.max_link_capacity:
-                            continue
+                        if conn.distance > 0:
+                            if (
+                                conn_reserv.get((f"{conn.name()}_dept", t), 0)
+                                > 0
+                            ):
+                                continue
+                            conflict = False
+                            for tau in range(t, t + move_cost):
+                                if (
+                                    conn_reserv.get((conn.name(), tau), 0)
+                                    >= conn.max_link_capacity
+                                ):
+                                    conflict = True
+                                    break
+                            if conflict:
+                                continue
+                        else:
+                            if (
+                                conn_reserv.get((conn.name(), t), 0)
+                                >= conn.max_link_capacity
+                            ):
+                                continue
 
                 hist_traffic = global_usage.get(next_zone.name, 0) * 0.01
                 curr_traffic = booked_zone * 0.02
@@ -177,16 +190,18 @@ class Pathfinder:
 
                 heapq.heappush(
                     min_heap,
-                    (sort_time, counter, next_t, next_zone, path + [next_zone])
+                    (
+                        sort_time,
+                        counter,
+                        next_t,
+                        next_zone,
+                        path + [next_zone],
+                    ),
                 )
 
         return []
 
     def _pathfinding_cost(self, zone: Zone) -> float:
-        """
-        Calculates the cost of moving through a zone,
-        including any reservation penalties.
-        """
         reservation_penalty = (
             0.1 * zone.reservations if hasattr(zone, "reservations") else 0
         )

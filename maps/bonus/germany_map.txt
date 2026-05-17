@@ -4,56 +4,56 @@
 nb_drones: 10
 
 # --- NORTH ---
-start_hub: Kiel 450 100 [color=kiel max_drones=10]
-hub: Hamburg 470 190 [zone=priority color=hamburg max_drones=3]
-hub: Schwerin 570 180 [color=schwerin]
-hub: Bremen 380 230 [color=bremen]
+start_hub: Kiel 450 100 [color=kiel max_drones=10 population=246000]
+hub: Hamburg 470 190 [zone=priority color=hamburg max_drones=3 population=1899000]
+hub: Schwerin 570 180 [color=schwerin population=96000]
+hub: Bremen 380 230 [color=bremen population=569000]
 
 # --- EAST ---
-hub: Berlin 715 290 [zone=priority color=berlin max_drones=4]
-hub: Potsdam 690 310 [color=potsdam]
-hub: Magdeburg 590 330 [color=magdeburg]
-hub: Dresden 750 420 [color=dresden]
-hub: Erfurt 540 440 [color=erfurt]
+hub: Berlin 715 290 [zone=priority color=berlin max_drones=4 population=3677000]
+hub: Potsdam 690 310 [color=potsdam population=183000]
+hub: Magdeburg 590 330 [color=magdeburg population=236000]
+hub: Dresden 750 420 [color=dresden population=556000]
+hub: Erfurt 540 440 [color=erfurt population=214000]
 
 # --- WEST & CENTRAL ---
 hub: Hanover 450 300 [color=hanover max_drones=2]
-hub: Dusseldorf 250 400 [color=dusseldorf max_drones=3]
-hub: Frankfurt 370 510 [color=frankfurt max_drones=10]
-hub: Mainz 330 530 [color=mainz]
+hub: Dusseldorf 250 400 [color=dusseldorf max_drones=3 population=620000]
+hub: Frankfurt 370 510 [color=frankfurt max_drones=10 population=764000]
+hub: Mainz 330 530 [color=mainz population=217000]
 
 # --- SOUTH & SOUTHWEST ---
-hub: Saarbrucken 240 590 [zone=restricted color=saarbrucken]
-hub: Stuttgart 410 630 [color=stuttgart max_drones=3]
-end_hub: Munich 560 690 [color=munich max_drones=10]
+hub: Saarbrucken 240 590 [zone=restricted color=saarbrucken population=180000]
+hub: Stuttgart 410 630 [color=stuttgart max_drones=3 population=630000]
+end_hub: Munich 560 690 [color=munich max_drones=10 population=1488000]
 
 # === FLIGHT ROUTES ===
 # From old start hub (Frankfurt)
 connection: Frankfurt-Mainz [distance=50km]
 connection: Frankfurt-Dusseldorf [distance=200km]
-connection: Frankfurt-Stuttgart
+connection: Frankfurt-Stuttgart [distance=200km]
 
 # Northern routes
-connection: Hanover-Bremen
-connection: Hanover-Hamburg
-connection: Hamburg-Kiel
-connection: Hamburg-Schwerin
-connection: Schwerin-Berlin
+connection: Hanover-Bremen [distance=120km]
+connection: Hanover-Hamburg [distance=150km]
+connection: Hamburg-Kiel [distance=95km]
+connection: Hamburg-Schwerin [distance=110km]
+connection: Schwerin-Berlin [distance=200km]
 
 # Eastern routes
-connection: Hanover-Magdeburg
-connection: Magdeburg-Potsdam
-connection: Potsdam-Berlin
-connection: Berlin-Dresden
-connection: Dresden-Erfurt
-connection: Munich-Dresden
+connection: Hanover-Magdeburg [distance=140km]
+connection: Magdeburg-Potsdam [distance=120km]
+connection: Potsdam-Berlin [distance=35km]
+connection: Berlin-Dresden [distance=190km]
+connection: Dresden-Erfurt [distance=210km]
+connection: Munich-Dresden [distance=460km]
 
 # Southern routes
-connection: Dusseldorf-Saarbrucken
-connection: Saarbrucken-Stuttgart [max_link_capacity=2]
-connection: Stuttgart-Munich [max_link_capacity=3]
-connection: Erfurt-Munich
-connection: Frankfurt-Munich [max_link_capacity=2]
+connection: Dusseldorf-Saarbrucken [distance=250km]
+connection: Saarbrucken-Stuttgart [max_link_capacity=2 distance=210km]
+connection: Stuttgart-Munich [max_link_capacity=3 distance=220km]
+connection: Erfurt-Munich [distance=400km]
+connection: Frankfurt-Munich [max_link_capacity=2 distance=390km]
 
 # --- New Cross-Country Routes ---
 # Connecting North and West

@@ -31,6 +31,8 @@ class Zone:
         self.is_start = is_start
         self.is_end = is_end
         self.reservations: int = reservations
+        self.population: int = 0
+        self.explicit_max_drones: bool = False
 
     def movement_cost(self) -> int:
         if self.zone_type == ZoneType.RESTRICTED:
