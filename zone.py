@@ -10,6 +10,8 @@ class ZoneType(Enum):
 
 
 class Zone:
+    """Represents a single zone in the grid."""
+
     def __init__(
         self,
         name: str,
@@ -22,6 +24,7 @@ class Zone:
         is_end: bool = False,
         reservations: int = 0,
     ) -> None:
+        """Initialize zone configuration and state."""
         self.name = name
         self.x = x
         self.y = y
@@ -35,19 +38,23 @@ class Zone:
         self.explicit_max_drones: bool = False
 
     def movement_cost(self) -> int:
+        """Return movement cost for entering the zone."""
         if self.zone_type == ZoneType.RESTRICTED:
             return 2
         return 1
 
     def is_accessible(self) -> bool:
+        """Return whether the zone is accessible."""
         return self.zone_type != ZoneType.BLOCKED
 
     def effective_capacity(self) -> int | float:
+        """Return the effective capacity of the zone."""
         if self.is_start or self.is_end:
             return float('inf')
         return self.max_drones
 
     def __repr__(self) -> str:
+        """Return a string representation of the zone."""
         return (
             f"Zone({self.name}, {self.zone_type.value}, "
             f"cap={self.max_drones})"
