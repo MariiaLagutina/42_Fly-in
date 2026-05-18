@@ -1,10 +1,10 @@
 import random
 import string
 import sys
-from dataclasses import dataclass
-from typing import Literal, Optional, TypedDict
-
 import pygame
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Literal, Optional, TypedDict
 
 from events import (
     AgentMoved,
@@ -18,6 +18,7 @@ from graph import Graph
 
 PositionKind = Literal["zone", "connection"]
 Point = tuple[int, int]
+IMG_DIR = Path(__file__).resolve().parent / "img"
 
 
 class FlightInfo(TypedDict):
@@ -148,14 +149,14 @@ class AirlinesWindow:
             if "europa" in arg.lower():
                 bg_image_name = "europa.png"
         try:
-            bg = pygame.image.load(bg_image_name)
+            bg = pygame.image.load(IMG_DIR / bg_image_name)
             return pygame.transform.scale(bg, (self.map_width, self.height))
         except FileNotFoundError:
             return None
 
     def _load_drone_sprite(self) -> Optional[pygame.Surface]:
         try:
-            sprite = pygame.image.load("drone.png").convert_alpha()
+            sprite = pygame.image.load(IMG_DIR / "drone.png").convert_alpha()
             base_size = (26, 26)
             base_sprite = pygame.transform.scale(sprite, base_size)
 
@@ -188,7 +189,7 @@ class AirlinesWindow:
     def _load_car_sprite(self) -> Optional[pygame.Surface]:
         try:
             # Add a programmatic 1 px white border around the car icon.
-            sprite = pygame.image.load("car.png").convert_alpha()
+            sprite = pygame.image.load(IMG_DIR / "car.png").convert_alpha()
             base_size = (25, 25)
             base_sprite = pygame.transform.scale(sprite, base_size)
 
@@ -228,7 +229,7 @@ class AirlinesWindow:
                 ("tailwind", "sun.png"),
             ]
             for cond, file in files:
-                surf = pygame.image.load(file).convert_alpha()
+                surf = pygame.image.load(IMG_DIR / file).convert_alpha()
                 icons[cond] = pygame.transform.scale(surf, (30, 30))
         except FileNotFoundError:
             pass

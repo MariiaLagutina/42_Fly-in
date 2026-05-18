@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal, Optional
 
 import pygame
@@ -14,6 +15,7 @@ from graph import Graph
 from zone import Zone, ZoneType
 
 PositionKind = Literal["zone", "connection"]
+IMG_DIR = Path(__file__).resolve().parent / "img"
 
 
 @dataclass(frozen=True)
@@ -123,7 +125,9 @@ class DroneSimulationWindow:
 
         self.autoplay = True
 
-        self.drone_sprite = pygame.image.load("drone.png").convert_alpha()
+        self.drone_sprite = pygame.image.load(
+            IMG_DIR / "drone.png"
+        ).convert_alpha()
         self.drone_sprite.set_colorkey((255, 255, 255))
         self.drone_sprite = pygame.transform.scale(self.drone_sprite, (30, 30))
 
