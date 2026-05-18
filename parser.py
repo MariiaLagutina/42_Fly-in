@@ -12,6 +12,10 @@ class ParseError(Exception):
 
 
 class Parser:
+    """
+    Parses a configuration file to build the graph and
+    determine the number of drones.
+    """
     def parse(self, filepath: str) -> tuple[Graph, int]:
         graph = Graph()
         nb_drones = 0
@@ -81,6 +85,7 @@ class Parser:
         is_start: bool = False,
         is_end: bool = False,
     ) -> Zone:
+        """Parse a zone definition line and return a Zone object."""
         metadata, line = self._parse_metadata(line, line_num)
         parts = line.split()
 
@@ -138,6 +143,7 @@ class Parser:
     def _parse_connection(
         self, line: str, line_num: int, graph: Graph
     ) -> Connection:
+        """Parse a connection definition line and return a Connection object"""
         metadata, line = self._parse_metadata(line, line_num)
         parts = line.split(":", 1)
 
@@ -192,6 +198,10 @@ class Parser:
     def _parse_metadata(
         self, line: str, line_num: int
     ) -> tuple[dict[str, str], str]:
+        """
+        Extract metadata from a line and return it along
+        with the line without metadata.
+        """
         metadata: dict[str, str] = {}
         match = re.search(r"\[(.*?)\]", line)
 

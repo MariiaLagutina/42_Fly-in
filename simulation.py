@@ -8,7 +8,7 @@ from zone import Zone
 from weather import WeatherSystem
 from events import (
     AgentMoved,
-    AgentRefueling,
+    AgentInTransit,
     CapacitySnapshot,
     EventDispatcher,
     SimulationEvent,
@@ -116,12 +116,12 @@ class Simulator:
 
                 t += cost
                 if not z_next.is_start and not z_next.is_end:
-                    reservations[(z_next.name, t)] = reservations.get(
-                        (z_next.name, t), 0
-                    ) + 1
-                    global_usage[z_next.name] = global_usage.get(
-                        z_next.name, 0
-                    ) + 1
+                    reservations[(z_next.name, t)] = (
+                        reservations.get((z_next.name, t), 0) + 1
+                    )
+                    global_usage[z_next.name] = (
+                        global_usage.get(z_next.name, 0) + 1
+                    )
 
     def _path_cost(self, path: list[Zone]) -> int:
         return sum(zone.movement_cost() for zone in path[1:])
@@ -258,7 +258,7 @@ class Simulator:
 
                 turn.add_movement(drone.label, conn_name)
                 self._emit(
-                    AgentRefueling(
+                    AgentInTransit(
                         turn_number,
                         drone.label,
                         origin,

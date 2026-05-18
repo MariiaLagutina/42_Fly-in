@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Protocol, Union
+from typing import Protocol
 
 
 @dataclass(frozen=True)
@@ -17,7 +17,7 @@ class AgentMoved:
 
 
 @dataclass(frozen=True)
-class AgentRefueling:
+class AgentInTransit:
     turn_number: int
     agent_label: str
     origin: str
@@ -46,14 +46,14 @@ class WeatherChanged:
     is_open: bool
 
 
-SimulationEvent = Union[
-    TurnStarted,
-    AgentMoved,
-    AgentRefueling,
-    TurnFinished,
-    CapacitySnapshot,
-    WeatherChanged,
-]
+SimulationEvent = (
+    TurnStarted
+    | AgentMoved
+    | AgentInTransit
+    | TurnFinished
+    | CapacitySnapshot
+    | WeatherChanged
+)
 
 
 class EventListener(Protocol):

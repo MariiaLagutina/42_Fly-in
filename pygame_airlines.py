@@ -8,7 +8,7 @@ from typing import Literal, Optional, TypedDict
 
 from events import (
     AgentMoved,
-    AgentRefueling,
+    AgentInTransit,
     EventListener,
     SimulationEvent,
     WeatherChanged,
@@ -262,7 +262,7 @@ class AirlinesWindow:
                 "Delivered" if getattr(event, "delivered", False) else "Landed"
             )
 
-        elif isinstance(event, AgentRefueling):
+        elif isinstance(event, AgentInTransit):
             self.drone_positions[event.agent_label] = DroneDisplayPosition(
                 "connection",
                 event.origin,
@@ -414,9 +414,7 @@ class AirlinesWindow:
             border_radius=4,
         )
 
-        status_color = (
-            (46, 204, 113) if self.is_playing else (231, 76, 60)
-        )
+        status_color = (46, 204, 113) if self.is_playing else (231, 76, 60)
         status_text = "AUTO" if self.is_playing else "PAUSE"
         status_surf = self.dashboard_font.render(
             status_text, True, status_color
@@ -533,9 +531,7 @@ class AirlinesWindow:
                 status_str = "LANDED"
                 status_color = (241, 196, 15)
 
-            card_rect = pygame.Rect(
-                sb_x + 15, y, self.sidebar_width - 30, 50
-            )
+            card_rect = pygame.Rect(sb_x + 15, y, self.sidebar_width - 30, 50)
             pygame.draw.rect(
                 self.screen, (35, 45, 60), card_rect, border_radius=4
             )

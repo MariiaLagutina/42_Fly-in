@@ -1,6 +1,6 @@
 from events import (
     AgentMoved,
-    AgentRefueling,
+    AgentInTransit,
     CapacitySnapshot,
     SimulationEvent,
     TurnStarted,
@@ -40,8 +40,12 @@ class Visualizer:
 
     def _apply_rainbow_effect(self, text: str) -> str:
         rainbow_colors = [
-            "\033[31m", "\033[33m", "\033[32m",
-            "\033[36m", "\033[34m", "\033[35m"
+            "\033[31m",
+            "\033[33m",
+            "\033[32m",
+            "\033[36m",
+            "\033[34m",
+            "\033[35m",
         ]
         result = ""
         for i, char in enumerate(text):
@@ -52,12 +56,23 @@ class Visualizer:
 
     def _ansi_color(self, color: str | None) -> str:
         colors = {
-            "black": "\033[30m", "red": "\033[31m", "green": "\033[32m",
-            "yellow": "\033[33m", "blue": "\033[34m", "purple": "\033[35m",
-            "magenta": "\033[35m", "cyan": "\033[36m", "white": "\033[37m",
-            "orange": "\033[33m", "gold": "\033[33m", "brown": "\033[33m",
-            "violet": "\033[35m", "maroon": "\033[31m", "darkred": "\033[31m",
-            "crimson": "\033[31m", "rainbow": "\033[36m",
+            "black": "\033[30m",
+            "red": "\033[31m",
+            "green": "\033[32m",
+            "yellow": "\033[33m",
+            "blue": "\033[34m",
+            "purple": "\033[35m",
+            "magenta": "\033[35m",
+            "cyan": "\033[36m",
+            "white": "\033[37m",
+            "orange": "\033[33m",
+            "gold": "\033[33m",
+            "brown": "\033[33m",
+            "violet": "\033[35m",
+            "maroon": "\033[31m",
+            "darkred": "\033[31m",
+            "crimson": "\033[31m",
+            "rainbow": "\033[36m",
         }
         return colors.get(color or "", "")
 
@@ -70,7 +85,7 @@ class AirlinesVisualizer:
     def handle(self, event: SimulationEvent) -> None:
         if isinstance(event, TurnStarted):
             self._current_turn_lines = [f"Turn {event.turn_number}"]
-        elif isinstance(event, AgentRefueling):
+        elif isinstance(event, AgentInTransit):
             self._current_turn_lines.append(
                 f"  {event.agent_label}: {event.origin} -> "
                 f"{event.destination} via {event.connection} "

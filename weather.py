@@ -6,6 +6,7 @@ from graph import Graph
 
 
 class WeatherSystem:
+    """Manages dynamic weather conditions affecting connections."""
     def __init__(
         self,
         graph: Graph,
@@ -17,6 +18,7 @@ class WeatherSystem:
         self.storm_chance = 0.05  # 5% chance per connection each turn
 
     def update_weather(self, turn_number: int) -> None:
+        """Randomly update weather conditions on connections each turn."""
         for conn in self.active_storms[:]:
             if random.random() < 0.20:
                 conn.set_weather("clear", is_open=True)
@@ -41,6 +43,7 @@ class WeatherSystem:
                 self._emit_weather(turn_number, conn)
 
     def _emit_weather(self, turn_number: int, conn: Connection) -> None:
+        """Emit a WeatherChanged event if a dispatcher is available."""
         if self.dispatcher:
             self.dispatcher.dispatch(
                 WeatherChanged(

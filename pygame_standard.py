@@ -6,7 +6,7 @@ import pygame
 
 from events import (
     AgentMoved,
-    AgentRefueling,
+    AgentInTransit,
     EventListener,
     SimulationEvent,
     TurnFinished,
@@ -64,7 +64,7 @@ class PygameStandardVisualizer(EventListener):
                     "zone",
                     event.destination,
                 )
-            elif isinstance(event, AgentRefueling):
+            elif isinstance(event, AgentInTransit):
                 positions[event.agent_label] = DroneDisplayPosition(
                     "connection",
                     event.origin,
