@@ -1,5 +1,3 @@
-import math
-
 from connection import Connection
 from drone import Drone, DroneState
 from graph import Graph
@@ -80,29 +78,8 @@ class Simulator:
             for i in range(len(path) - 1):
                 z_curr, z_next = path[i], path[i + 1]
 
-                if z_next == z_curr:
-                    cost = 1
-                else:
-                    conn = self.graph.get_connection(z_curr, z_next)
-                    if conn and conn.distance > 0:
-                        if conn.distance < 200:
-                            cost = math.ceil(conn.distance / 100.0)
-                            if self.enable_dynamic_weather:
-                                if conn.weather_condition in ("storm", "snow"):
-                                    cost += 2
-                                elif conn.weather_condition == "rain":
-                                    cost += 1
-                            cost = max(1, cost)
-                        else:
-                            eff_dist = float(conn.distance)
-                            if (
-                                self.enable_dynamic_weather
-                                and conn.weather_condition == "tailwind"
-                            ):
-                                eff_dist /= 2.0
-                            cost = max(1, math.ceil(eff_dist / 400.0))
-                    else:
-                        cost = z_next.movement_cost()
+                # Use the centralized pathfinder logic
+                cost = self.pathfinder._calculate_move_cost(z_curr, z_next)
 
                 if z_next != z_curr:
                     conn = self.graph.get_connection(z_curr, z_next)
@@ -245,7 +222,12 @@ class Simulator:
                 continue
 
             zone_occupancy[drone.current_zone.name] -= 1
-            transit_time = self._calculate_transit_time(next_zone, connection)
+
+            # Replaced the redundant _calculate_transit_time with our
+            # clean pathfinder method
+            transit_time = self.pathfinder._calculate_move_cost(
+                drone.current_zone, next_zone
+            )
             conn_name = connection.name()
 
             if transit_time > 1:
@@ -298,38 +280,6 @@ class Simulator:
             turn_number, zone_occupancy, connection_usage
         )
         return turn
-
-    def _calculate_transit_time(
-        self, next_zone: Zone, connection: Connection
-    ) -> int:
-        if connection.distance > 0:
-            if connection.distance < 200:
-                base_turns = math.ceil(connection.distance / 100.0)
-                if self.enable_dynamic_weather:
-                    if connection.weather_condition in ("storm", "snow"):
-                        base_turns += 2
-                    elif connection.weather_condition == "rain":
-                        base_turns += 1
-                return max(1, base_turns)
-
-            eff_distance = float(connection.distance)
-            if (
-                self.enable_dynamic_weather
-                and connection.weather_condition == "tailwind"
-            ):
-                eff_distance /= 2.0
-            return max(1, math.ceil(eff_distance / 400.0))
-
-        base_time = next_zone.movement_cost()
-        if not self.enable_dynamic_weather:
-            return base_time
-
-        if connection.weather_condition == "tailwind":
-            return max(1, base_time - 1)
-        elif connection.weather_condition == "rain":
-            return base_time + 1
-
-        return base_time
 
     def _emit(self, event: SimulationEvent) -> None:
         if self.dispatcher is not None:

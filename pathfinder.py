@@ -4,16 +4,20 @@ from collections import deque
 from typing import TypeAlias
 from zone import Zone
 from graph import Graph
+from config import SimulationConfig
 
 PathHeapItem: TypeAlias = tuple[float, int, Zone, list[Zone]]
 TimedPathHeapItem: TypeAlias = tuple[float, int, int, Zone, list[Zone]]
 
 
 class Pathfinder:
+    """Manages routing algorithms and state-aware path planning."""
+
     def __init__(self, graph: Graph) -> None:
         self.graph = graph
 
     def find_path_bfs(self, start: Zone, end: Zone) -> list[Zone]:
+        """Finds the shortest structural route using BFS without weights."""
         visited = set()
         queue = deque([(start, [start])])
 
@@ -35,6 +39,7 @@ class Pathfinder:
     def find_path_dijkstra(
         self, start: Zone, end: Zone
     ) -> tuple[list[Zone], float]:
+        """Calculates the lowest-cost static path using Dijkstra."""
         visited = set()
         counter = 0
         min_heap: list[PathHeapItem] = [(0.0, counter, start, [start])]
@@ -57,11 +62,12 @@ class Pathfinder:
                         (total_cost, counter, neighbor, path + [neighbor]),
                     )
 
-        return [], 999999
+        return [], SimulationConfig.UNREACHABLE_COST
 
     def find_multiple_paths(
         self, start: Zone, end: Zone, n: int
     ) -> list[list[Zone]]:
+        """Finds up to n distinct paths to distribute drone traffic."""
         if n <= 0:
             return []
 
@@ -103,11 +109,10 @@ class Pathfinder:
         conn_reserv: dict[tuple[str, int], int],
         global_usage: dict[str, int],
     ) -> list[Zone]:
+        """Calculates optimal conflict-free routes considering constraints."""
         visited: set[tuple[str, int]] = set()
         counter = 0
-        min_heap: list[TimedPathHeapItem] = [
-            (0.0, counter, 0, start, [start])
-        ]
+        min_heap: list[TimedPathHeapItem] = [(0.0, counter, 0, start, [start])]
 
         while min_heap:
             score, _, t, current_zone, path = heapq.heappop(min_heap)
@@ -124,69 +129,42 @@ class Pathfinder:
             possible_moves.append(current_zone)
 
             for next_zone in possible_moves:
-                if next_zone == current_zone:
-                    move_cost = 1
-                else:
-                    conn = self.graph.get_connection(current_zone, next_zone)
-                    if conn and conn.distance > 0:
-                        if conn.distance < 200:
-                            # Car mode: base speed is 100 km/h.
-                            move_cost = math.ceil(conn.distance / 100.0)
-                            if conn.weather_condition in ("storm", "snow"):
-                                move_cost += 2
-                            elif conn.weather_condition == "rain":
-                                move_cost += 1
-                            move_cost = max(1, move_cost)
-                        else:
-                            # Airplane mode: base speed is 400 km/h.
-                            eff_dist = float(conn.distance)
-                            if conn.weather_condition == "tailwind":
-                                eff_dist /= 2.0
-                            move_cost = max(1, math.ceil(eff_dist / 400.0))
-                    else:
-                        move_cost = next_zone.movement_cost()
-
+                move_cost = self._calculate_move_cost(current_zone, next_zone)
                 next_t = t + move_cost
-                priority_discount = (
-                    0.1 if next_zone.zone_type.name == "PRIORITY" else 0.0
-                )
 
-                booked_zone = reservations.get((next_zone.name, next_t), 0)
-                if booked_zone >= next_zone.effective_capacity():
+                # Reject the move if capacity is exceeded
+                if not self._is_move_valid(
+                    current_zone,
+                    next_zone,
+                    t,
+                    move_cost,
+                    reservations,
+                    conn_reserv,
+                ):
                     continue
 
-                if next_zone != current_zone:
-                    conn = self.graph.get_connection(current_zone, next_zone)
-                    if conn:
-                        if conn.distance > 0:
-                            if (
-                                conn_reserv.get((f"{conn.name()}_dept", t), 0)
-                                > 0
-                            ):
-                                continue
-                            conflict = False
-                            for tau in range(t, t + move_cost):
-                                if (
-                                    conn_reserv.get((conn.name(), tau), 0)
-                                    >= conn.max_link_capacity
-                                ):
-                                    conflict = True
-                                    break
-                            if conflict:
-                                continue
-                        else:
-                            if (
-                                conn_reserv.get((conn.name(), t), 0)
-                                >= conn.max_link_capacity
-                            ):
-                                continue
+                # Traffic balancing and priority calculations
+                priority_discount = (
+                    SimulationConfig.PRIORITY_ZONE_DISCOUNT
+                    if next_zone.zone_type.name == "PRIORITY"
+                    else 0.0
+                )
 
-                hist_traffic = global_usage.get(next_zone.name, 0) * 0.01
-                curr_traffic = booked_zone * 0.02
+                booked = reservations.get((next_zone.name, next_t), 0)
+                hist_traffic = (
+                    global_usage.get(next_zone.name, 0)
+                    * SimulationConfig.HIST_TRAFFIC_WEIGHT
+                )
+                curr_traffic = booked * SimulationConfig.CURR_TRAFFIC_WEIGHT
 
                 counter += 1
-                traffic = hist_traffic + curr_traffic
-                sort_time = score + move_cost - priority_discount + traffic
+                sort_time = (
+                    score
+                    + move_cost
+                    - priority_discount
+                    + hist_traffic
+                    + curr_traffic
+                )
 
                 heapq.heappush(
                     min_heap,
@@ -201,15 +179,83 @@ class Pathfinder:
 
         return []
 
+    def _calculate_move_cost(self, current_zone: Zone, next_zone: Zone) -> int:
+        """Calculates travel time based on distance and weather."""
+        if next_zone == current_zone:
+            return 1
+
+        conn = self.graph.get_connection(current_zone, next_zone)
+        if not conn or conn.distance <= 0:
+            return int(next_zone.movement_cost())
+
+        if conn.distance < SimulationConfig.AIR_TRAVEL_MIN_DIST:
+            cost = math.ceil(conn.distance / SimulationConfig.CAR_SPEED_KMH)
+            if conn.weather_condition in ("storm", "snow"):
+                cost += SimulationConfig.WEATHER_PENALTY_SEVERE
+            elif conn.weather_condition == "rain":
+                cost += SimulationConfig.WEATHER_PENALTY_MILD
+            return max(1, cost)
+
+        eff_dist = float(conn.distance)
+        if conn.weather_condition == "tailwind":
+            eff_dist /= SimulationConfig.TAILWIND_DIST_DIVISOR
+
+        cost = math.ceil(eff_dist / SimulationConfig.AIRPLANE_SPEED_KMH)
+        return max(1, cost)
+
+    def _is_move_valid(
+        self,
+        curr_zone: Zone,
+        next_zone: Zone,
+        t: int,
+        move_cost: int,
+        reservations: dict[tuple[str, int], int],
+        conn_reserv: dict[tuple[str, int], int],
+    ) -> bool:
+        """Checks if the destination and connections have available capacity"""
+        next_t = t + move_cost
+
+        # Check if the destination zone is full when we arrive
+        booked = reservations.get((next_zone.name, next_t), 0)
+        if booked >= next_zone.effective_capacity():
+            return False
+
+        if next_zone == curr_zone:
+            return True
+
+        conn = self.graph.get_connection(curr_zone, next_zone)
+        if not conn:
+            return True
+
+        # Check for mid-air collisions/head-on traffic on the connection
+        if conn.distance > 0:
+            if conn_reserv.get((f"{conn.name()}_dept", t), 0) > 0:
+                return False
+            for tau in range(t, t + move_cost):
+                reserved = conn_reserv.get((conn.name(), tau), 0)
+                if reserved >= conn.max_link_capacity:
+                    return False
+        else:
+            if conn_reserv.get((conn.name(), t), 0) >= conn.max_link_capacity:
+                return False
+
+        return True
+
     def _pathfinding_cost(self, zone: Zone) -> float:
+        """Returns the base movement cost plus traffic penalties."""
         reservation_penalty = (
-            0.1 * zone.reservations if hasattr(zone, "reservations") else 0
+            SimulationConfig.RESERVATION_PENALTY_WEIGHT * zone.reservations
+            if hasattr(zone, "reservations")
+            else 0
         )
         if zone.zone_type.name == "PRIORITY":
-            return 0.5 + reservation_penalty
+            return (
+                SimulationConfig.PRIORITY_ZONE_BASE_COST + reservation_penalty
+            )
         return float(zone.movement_cost()) + reservation_penalty
 
     def heuristic(self, zone: Zone, end: Zone) -> float:
+        """Estimates cost using straight-line Euclidean distance."""
         dx = float(zone.x - end.x)
         dy = float(zone.y - end.y)
         return math.sqrt((dx * dx) + (dy * dy))
