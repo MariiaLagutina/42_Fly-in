@@ -1,5 +1,5 @@
+import math
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Literal, Optional
 
 import pygame
@@ -13,9 +13,9 @@ from events import (
 )
 from graph import Graph
 from zone import Zone, ZoneType
+from pygame_common import UIColors, UIConstants, load_sprite
 
 PositionKind = Literal["zone", "connection"]
-IMG_DIR = Path(__file__).resolve().parent / "img"
 
 
 @dataclass(frozen=True)
@@ -51,8 +51,7 @@ class PygameStandardVisualizer(EventListener):
 
         positions = {
             f"D{drone_id}": DroneDisplayPosition(
-                "zone",
-                self.graph.start_zone.name,
+                "zone", self.graph.start_zone.name
             )
             for drone_id in range(1, self.nb_drones + 1)
         }
@@ -61,98 +60,84 @@ class PygameStandardVisualizer(EventListener):
         for event in self.event_queue:
             if isinstance(event, AgentMoved):
                 positions[event.agent_label] = DroneDisplayPosition(
-                    "zone",
-                    event.destination,
+                    "zone", event.destination
                 )
             elif isinstance(event, AgentInTransit):
                 positions[event.agent_label] = DroneDisplayPosition(
-                    "connection",
-                    event.origin,
-                    event.destination,
+                    "connection", event.origin, event.destination
                 )
             elif isinstance(event, TurnFinished):
                 frames.append(
                     StandardTurnFrame(
-                        event.turn_number,
-                        positions.copy(),
-                        event.movements,
+                        event.turn_number, positions.copy(), event.movements
                     )
                 )
         return frames
 
 
 class DroneSimulationWindow:
-    """Main pygame window for drone simulation visualization."""
+    """Main pygame window for standard drone simulation visualization."""
 
     MAP_ZONE_COLORS = {
-        # Base Colors (Easy / Medium / Hard 1)
-        "green": (46, 204, 113),
-        "blue": (52, 152, 219),
-        "red": (231, 76, 60),
-        "yellow": (241, 196, 15),
-        "orange": (230, 126, 34),
-        "cyan": (0, 188, 212),
-        # Colors (Hard 3: Ultimate)
-        "purple": (155, 89, 182),
-        "brown": (145, 100, 70),
-        "lime": (145, 220, 35),
-        "magenta": (240, 30, 240),
-        "gold": (245, 190, 25),
-        # Extreme Colors (Challenger: Impossible Dream)
-        "black": (42, 46, 54),  # Deep black
-        "maroon": (115, 35, 35),  # Burgundy
-        "darkred": (145, 20, 20),  # Deep red
-        "violet": (180, 120, 245),  # Violet
-        "crimson": (220, 20, 60),  # Crimson/Pink
+        "green": UIColors.GREEN,
+        "blue": UIColors.BLUE,
+        "red": UIColors.RED,
+        "yellow": UIColors.YELLOW,
+        "orange": UIColors.ORANGE,
+        "cyan": UIColors.CYAN,
+        "purple": UIColors.PURPLE,
+        "brown": UIColors.BROWN,
+        "lime": UIColors.LIME,
+        "magenta": UIColors.MAGENTA,
+        "gold": UIColors.GOLD,
+        "black": (42, 46, 54),
+        "maroon": (115, 35, 35),
+        "darkred": (145, 20, 20),
+        "violet": (180, 120, 245),
+        "crimson": (220, 20, 60),
     }
 
     def __init__(
         self,
         visualizer: PygameStandardVisualizer,
-        width: int = 1200,
-        height: int = 800,
+        width: int = UIConstants.STANDARD_WIDTH,
+        height: int = UIConstants.STANDARD_HEIGHT,
     ) -> None:
         """Initialize pygame window and layout parameters."""
         pygame.init()
         self.visualizer = visualizer
         self.frames = visualizer.build_frames()
         self.graph = visualizer.graph
-
-        self.margin = 40
-        self.history_height = 140
-        self.screen = pygame.display.set_mode((width, height))
-        pygame.display.set_caption("Fly-in UI")
-
         self.autoplay = True
 
-        self.drone_sprite = pygame.image.load(
-            IMG_DIR / "drone.png"
-        ).convert_alpha()
-        self.drone_sprite.set_colorkey((255, 255, 255))
-        self.drone_sprite = pygame.transform.scale(self.drone_sprite, (30, 30))
+        self.screen = pygame.display.set_mode((width, height))
+        pygame.display.set_caption("Fly-in UI: Standard Mode")
 
+        self.drone_sprite = load_sprite("drone.png", (30, 30))
         self.clock = pygame.time.Clock()
+
         self.title_font = pygame.font.SysFont("Arial", 20, bold=True)
         self.text_font = pygame.font.SysFont("Arial", 15)
         self.node_font = pygame.font.SysFont("Arial", 13)
 
+        margin = UIConstants.MARGIN
+        panel_h = UIConstants.HISTORY_PANEL_HEIGHT
         self.viewport = pygame.Rect(
-            self.margin,
-            self.history_height + self.margin,
-            width - (self.margin * 2),
-            height - self.history_height - (self.margin * 2),
+            margin,
+            panel_h + margin,
+            width - (margin * 2),
+            height - panel_h - (margin * 2),
         )
         self.node_positions = self._calculate_adaptive_positions()
 
     def _calculate_adaptive_positions(self) -> dict[str, tuple[int, int]]:
-        """Map graph zone coordinates to screen positions."""
+        """Map graph zone coordinates to screen positions based on viewport."""
         zones = list(self.graph.zones.values())
         if not zones:
             return {}
 
         xs = [z.x for z in zones]
         ys = [z.y for z in zones]
-
         min_x, max_x = min(xs), max(xs)
         min_y, max_y = min(ys), max(ys)
 
@@ -170,255 +155,134 @@ class DroneSimulationWindow:
                 self.viewport.top + (norm_y * (self.viewport.height - 60)) + 30
             )
             positions[zone.name] = (screen_x, screen_y)
+
         return positions
-
-    def _get_short_name(self, name: str) -> str:
-        """Shorten names while preserving trailing numbers."""
-        readable = name.replace("_", " ").title()
-        if len(readable) > 11:
-            # Preserve trailing digits such as "1", "5", or "12".
-            suffix = ""
-            main_part = readable
-            while main_part and main_part[-1].isdigit():
-                suffix = main_part[-1] + suffix
-                main_part = main_part[:-1]
-
-            main_part = main_part.strip()
-            words = main_part.split()
-
-            # Keep the first word and abbreviate the second one when present.
-            if len(words) > 1:
-                short_main = f"{words[0]} {words[1][0]}."
-            else:
-                short_main = main_part[:7] + ".."
-
-            return f"{short_main}{suffix}"
-        return readable
 
     def _get_zone_color(self, zone: Zone) -> tuple[int, int, int]:
         """Get RGB color for a zone based on its properties."""
-        if zone.color == "rainbow":
-            import time
-            import math
-
-            frequency = 3.5
-            current_tick = time.time() * frequency
-            r = int((math.sin(current_tick) + 1) * 127.5)
-            g = int((math.sin(current_tick + 2) + 1) * 127.5)
-            b = int((math.sin(current_tick + 4) + 1) * 127.5)
-            return (r, g, b)
-
         if zone.color in self.MAP_ZONE_COLORS:
             return self.MAP_ZONE_COLORS[zone.color]
-
         if zone.is_start:
-            return (39, 174, 96)
+            return UIColors.GREEN
         if zone.is_end:
-            return (192, 57, 43)
+            return UIColors.RED
         if zone.zone_type == ZoneType.PRIORITY:
-            return (41, 128, 185)
+            return UIColors.BLUE
         if zone.zone_type == ZoneType.RESTRICTED:
-            return (155, 89, 182)
+            return UIColors.PURPLE
         if zone.zone_type == ZoneType.BLOCKED:
-            return (127, 140, 141)
-
-        return (220, 225, 230)
-
-    def _draw_history_bar(self, frame: StandardTurnFrame) -> None:
-        """Draw turn info, status, and movement history at top."""
-        total_turns = max(0, len(self.frames) - 1)
-        panel_rect = pygame.Rect(
-            0, 0, self.screen.get_width(), self.history_height
-        )
-        pygame.draw.rect(self.screen, (31, 38, 46), panel_rect)
-        pygame.draw.line(
-            self.screen,
-            (52, 152, 219),
-            (0, self.history_height),
-            (self.screen.get_width(), self.history_height),
-            2,
-        )
-
-        turn_str = f"Turn: {frame.turn_number} / {total_turns}"
-        turn_surface = self.title_font.render(turn_str, True, (255, 255, 255))
-        self.screen.blit(turn_surface, (25, 20))
-
-        status_str = "[AUTO]" if self.autoplay else "[PAUSE]"
-        status_color = (46, 204, 113) if self.autoplay else (231, 76, 60)
-        status_surface = self.title_font.render(status_str, True, status_color)
-        status_x = 25 + turn_surface.get_width() + 15
-        self.screen.blit(status_surface, (status_x, 20))
-
-        hint_str = "(Space: Auto/Pause | Left/Right: Step | R: Reset)"
-        hint_surface = self.node_font.render(hint_str, True, (140, 152, 168))
-        self.screen.blit(hint_surface, (25, 48))
-
-        move_title = self.title_font.render("Movement:", True, (143, 211, 255))
-        self.screen.blit(move_title, (25, 80))
-
-        if not frame.movements:
-            initial_surface = self.text_font.render(
-                "Initial state (all drones at base)", True, (170, 183, 197)
-            )
-            init_x = 25 + move_title.get_width() + 15
-            self.screen.blit(initial_surface, (init_x, 82))
-            return
-
-        start_x = 25 + move_title.get_width() + 15
-        current_x = start_x
-        current_y = 82
-        line_spacing = 22
-        window_max_width = self.screen.get_width() - 25
-
-        for drone_label, destination in frame.movements:
-            short_dest = self._get_short_name(destination)
-            move_str = f"{drone_label}→{short_dest}"
-            element_surface = self.text_font.render(
-                move_str, True, (230, 237, 245)
-            )
-
-            if current_x + element_surface.get_width() > window_max_width:
-                current_x = start_x
-                current_y += line_spacing
-                if current_y + 18 > self.history_height:
-                    truncated_indicator = self.text_font.render(
-                        "...", True, (143, 211, 255)
-                    )
-                    self.screen.blit(
-                        truncated_indicator,
-                        (current_x, current_y - line_spacing),
-                    )
-                    break
-
-            self.screen.blit(element_surface, (current_x, current_y))
-            current_x += element_surface.get_width() + 18
+            return UIColors.BLACK
+        return UIColors.WHITE
 
     def draw(self, frame: StandardTurnFrame) -> None:
-        """Render graph, zones, connections and consolidated drone counts
-        with dashboard UI."""
-        self.screen.fill((155, 170, 185))
+        """Render the complete simulation frame."""
+        self.screen.fill(UIColors.SLATE_BG)
+
         self._draw_history_bar(frame)
 
-        active_connections = set()
+        active_conns, path_counts = self._analyze_frame_connections(frame)
+        self._draw_connections(active_conns, path_counts)
+
+        self._draw_zones()
+        self._draw_drones(frame)
+
+    def _analyze_frame_connections(
+        self, frame: StandardTurnFrame
+    ) -> tuple[set[tuple[str, str]], dict[tuple[str, str], int]]:
+        """Extracts which lines are active and paths sharing a line."""
+        active_connections: set[tuple[str, str]] = set()
         for pos_info in frame.positions.values():
-            if (
-                pos_info.kind == "connection"
-                and pos_info.second_zone is not None
-            ):
+            if pos_info.kind == "connection" and pos_info.second_zone:
                 c_id = tuple(
                     sorted([pos_info.first_zone, pos_info.second_zone])
                 )
-                active_connections.add(c_id)
+                if len(c_id) == 2:
+                    active_connections.add((c_id[0], c_id[1]))
 
         path_counts: dict[tuple[str, str], int] = {}
+        for conn in self.graph.connections:
+            path_id_list = sorted([conn.zone_a.name, conn.zone_b.name])
+            path_id = (path_id_list[0], path_id_list[1])
+            path_counts[path_id] = path_counts.get(path_id, 0) + 1
 
+        return active_connections, path_counts
+
+    def _draw_connections(
+        self,
+        active_connections: set[tuple[str, str]],
+        path_counts: dict[tuple[str, str], int],
+    ) -> None:
+        """Renders lines connecting the zones."""
         for conn in self.graph.connections:
             p1 = self.node_positions[conn.zone_a.name]
             p2 = self.node_positions[conn.zone_b.name]
+            path_id_list = sorted([conn.zone_a.name, conn.zone_b.name])
+            path_id = (path_id_list[0], path_id_list[1])
+            count = path_counts.get(path_id, 1)
 
-            path_id = tuple(sorted([conn.zone_a.name, conn.zone_b.name]))
-            if not isinstance(path_id, tuple) or len(path_id) != 2:
-                raise TypeError("path_id must be a tuple of two strings")
-            count = path_counts.get(path_id, 0)
-            path_counts[path_id] = count + 1
-
-            line_color = (35, 45, 55)
-            thickness = 3
+            line_color = UIColors.LINE_DEFAULT
+            thickness = UIConstants.LINE_THICKNESS_DEFAULT
 
             if path_id in active_connections:
-                line_color = (41, 128, 185)
-                thickness = 5
+                line_color = UIColors.BLUE
+                thickness = UIConstants.LINE_THICKNESS_ACTIVE
 
-            if count > 0:
-                import math
-
-                dx = p2[0] - p1[0]
-                dy = p2[1] - p1[1]
+            if count > 1:
+                dx, dy = p2[0] - p1[0], p2[1] - p1[1]
                 dist = math.hypot(dx, dy)
                 if dist > 0:
-                    nx = -dy / dist
-                    ny = dx / dist
                     offset = count * 6
                     p1 = (
-                        int(p1[0] + nx * offset),
-                        int(p1[1] + ny * offset),
+                        int(p1[0] - (dy / dist) * offset),
+                        int(p1[1] + (dx / dist) * offset),
                     )
                     p2 = (
-                        int(p2[0] + nx * offset),
-                        int(p2[1] + ny * offset),
+                        int(p2[0] - (dy / dist) * offset),
+                        int(p2[1] + (dx / dist) * offset),
                     )
 
             pygame.draw.line(
-                self.screen,
-                (255, 255, 255),
-                p1,
-                p2,
-                thickness + 2,
+                self.screen, UIColors.WHITE, p1, p2, thickness + 2
             )
-            pygame.draw.line(
-                self.screen,
-                line_color,
-                p1,
-                p2,
-                thickness,
-            )
+            pygame.draw.line(self.screen, line_color, p1, p2, thickness)
 
-        is_challenger = "impossible_goal" in self.graph.zones
-
-        row_label_indices: dict[str, int] = {}
-        rows: dict[int, list[Zone]] = {}
-        for zone in self.graph.zones.values():
-            rows.setdefault(zone.y, []).append(zone)
-
-        for row_zones in rows.values():
-            for row_idx, zone in enumerate(
-                sorted(row_zones, key=lambda item: item.x)
-            ):
-                row_label_indices[zone.name] = row_idx
-
+    def _draw_zones(self) -> None:
+        """Renders the circular nodes and their labels."""
         for zone in self.graph.zones.values():
             pos = self.node_positions[zone.name]
             color = self._get_zone_color(zone)
 
-            pygame.draw.circle(self.screen, color, pos, 16)
-            pygame.draw.circle(self.screen, (45, 55, 72), pos, 16, 2)
+            pygame.draw.circle(
+                self.screen, color, pos, UIConstants.NODE_RADIUS
+            )
+            pygame.draw.circle(
+                self.screen,
+                UIColors.ZONE_BORDER,
+                pos,
+                UIConstants.NODE_RADIUS,
+                2,
+            )
 
-            short_title = self._get_short_name(zone.name)
-            label = self.node_font.render(short_title, True, (45, 55, 72))
-
-            row_idx = row_label_indices[zone.name]
-            if row_idx % 2 == 0:
-                y_offset = -35
-                bg_y_offset = -37
-            else:
-                y_offset = 22
-                bg_y_offset = 20
-
+            label = self.node_font.render(
+                zone.name[:10], True, UIColors.ZONE_BORDER
+            )
             text_bg_rect = pygame.Rect(
                 pos[0] - label.get_width() // 2 - 4,
-                pos[1] + bg_y_offset,
+                pos[1] + 20,
                 label.get_width() + 8,
                 label.get_height() + 2,
             )
             pygame.draw.rect(
-                self.screen,
-                (255, 255, 255),
-                text_bg_rect,
-                border_radius=4,
-            )
-            pygame.draw.rect(
-                self.screen,
-                (208, 215, 222),
-                text_bg_rect,
-                width=1,
-                border_radius=4,
+                self.screen, UIColors.WHITE, text_bg_rect, border_radius=4
             )
             self.screen.blit(
-                label,
-                (pos[0] - label.get_width() // 2, pos[1] + y_offset),
+                label, (pos[0] - label.get_width() // 2, pos[1] + 22)
             )
 
+    def _draw_drones(self, frame: StandardTurnFrame) -> None:
+        """Renders drones and grouped count badges on the map."""
         drone_groups: dict[tuple[int, int], list[str]] = {}
+
         for drone_label, pos_info in frame.positions.items():
             p_start = self.node_positions[pos_info.first_zone]
             if pos_info.kind == "zone" or pos_info.second_zone is None:
@@ -429,36 +293,30 @@ class DroneSimulationWindow:
                     (p_start[0] + p_end[0]) // 2,
                     (p_start[1] + p_end[1]) // 2,
                 )
-            # Keep labels as strings so they match the expected type.
-            if not isinstance(drone_label, str):
-                raise TypeError(
-                    f"Expected label to be a string, "
-                    f"got {type(drone_label)}"
-                )
+
             drone_groups.setdefault(target_point, []).append(drone_label)
 
         for point, labels in drone_groups.items():
+            if getattr(self, "drone_sprite", None):
+                sprite_rect = self.drone_sprite.get_rect(center=point)
+                self.screen.blit(self.drone_sprite, sprite_rect)
+
             count = len(labels)
-            if count == 0:
-                continue
-
-            sprite_rect = self.drone_sprite.get_rect(center=point)
-            self.screen.blit(self.drone_sprite, sprite_rect)
-
             if count > 1:
-                count_str = str(count)
                 count_surface = self.node_font.render(
-                    count_str, True, (255, 255, 255)
+                    str(count), True, UIColors.WHITE
                 )
-
-                badge_radius = max(8, count_surface.get_width() // 2 + 3)
+                badge_radius = max(
+                    UIConstants.BADGE_RADIUS_MIN,
+                    count_surface.get_width() // 2 + 3,
+                )
                 badge_pos = (point[0] + 12, point[1] - 12)
 
                 pygame.draw.circle(
-                    self.screen, (231, 76, 60), badge_pos, badge_radius
+                    self.screen, UIColors.RED, badge_pos, badge_radius
                 )
                 pygame.draw.circle(
-                    self.screen, (255, 255, 255), badge_pos, badge_radius, 1
+                    self.screen, UIColors.WHITE, badge_pos, badge_radius, 1
                 )
 
                 blit_pos = (
@@ -467,16 +325,55 @@ class DroneSimulationWindow:
                 )
                 self.screen.blit(count_surface, blit_pos)
 
-        if is_challenger:
-            hint_font = pygame.font.SysFont("Arial", 13, italic=True)
-            hint_surf = hint_font.render(
-                "Use the move tracker above.",
-                True,
-                (55, 65, 80),
-            )
-            hint_x = (self.screen.get_width() - hint_surf.get_width()) // 2
-            hint_y = self.screen.get_height() - 25
-            self.screen.blit(hint_surf, (hint_x, hint_y))
+    def _draw_history_bar(self, frame: StandardTurnFrame) -> None:
+        """Draws the top panel showing turn status and movement logs."""
+        panel_rect = pygame.Rect(
+            0, 0, self.screen.get_width(), UIConstants.HISTORY_PANEL_HEIGHT
+        )
+        pygame.draw.rect(self.screen, UIColors.DARK_PANEL, panel_rect)
+        pygame.draw.line(
+            self.screen,
+            UIColors.BLUE,
+            (0, UIConstants.HISTORY_PANEL_HEIGHT),
+            (self.screen.get_width(), UIConstants.HISTORY_PANEL_HEIGHT),
+            2,
+        )
+
+        total_frames = max(0, len(self.frames) - 1)
+        turn_str = f"Turn: {frame.turn_number} / {total_frames}"
+        turn_surf = self.title_font.render(turn_str, True, UIColors.WHITE)
+        self.screen.blit(turn_surf, (25, 20))
+
+        status_str, status_color = (
+            ("[AUTO]", UIColors.GREEN)
+            if self.autoplay
+            else ("[PAUSE]", UIColors.RED)
+        )
+        status_surf = self.title_font.render(status_str, True, status_color)
+        self.screen.blit(status_surf, (200, 20))
+
+        hint_str = "(Space: Auto/Pause | Left/Right: Step | R: Reset)"
+        hint_surf = self.node_font.render(hint_str, True, UIColors.TEXT_MUTED)
+        self.screen.blit(hint_surf, (25, 48))
+
+        move_title = self.title_font.render(
+            "Movement:", True, UIColors.HIGHLIGHT
+        )
+        self.screen.blit(move_title, (25, 80))
+
+        current_x, current_y = 135, 82
+        for drone_label, dest in frame.movements:
+            move_str = f"{drone_label}→{dest[:7]}"
+            surf = self.text_font.render(move_str, True, UIColors.TEXT_LIGHT)
+
+            if current_x + surf.get_width() > self.screen.get_width() - 25:
+                current_x = 135
+                current_y += 22
+                if current_y + 18 > UIConstants.HISTORY_PANEL_HEIGHT:
+                    break
+
+            self.screen.blit(surf, (current_x, current_y))
+            current_x += surf.get_width() + 18
 
     def run_loop(self) -> None:
         """Main event loop for simulation playback."""
@@ -504,7 +401,10 @@ class DroneSimulationWindow:
                         self.autoplay = False
                         current_index = 0
 
-            if self.autoplay and now - last_update >= 600:
+            if (
+                self.autoplay
+                and now - last_update >= UIConstants.TURN_DELAY_MS
+            ):
                 if current_index < len(self.frames) - 1:
                     current_index += 1
                     last_update = now
@@ -513,7 +413,7 @@ class DroneSimulationWindow:
 
             self.draw(self.frames[current_index])
             pygame.display.flip()
-            self.clock.tick(60)
+            self.clock.tick(UIConstants.FPS)
 
         pygame.quit()
 
