@@ -4,7 +4,7 @@
 nb_drones: 15
 
 # --- IBERIAN PENINSULA (START) ---
-hub: Lisbon 100 600 [color=lisbon max_drones=15 population=505000]
+hub: Lisbon 100 600 [color=lisbon population=505000]
 hub: Madrid 190 590 [color=madrid population=3223000]
 hub: Barcelona 270 590 [color=barcelona population=1620000]
 
