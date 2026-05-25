@@ -1,6 +1,6 @@
 PY_FILES = main.py simulation.py pathfinder.py parser.py graph.py zone.py \
 	connection.py drone.py events.py visualizers.py pygame_standard.py \
-	pygame_airlines.py weather.py
+	pygame_airlines.py pygame_common.py weather.py
 
 install:
 	uv venv

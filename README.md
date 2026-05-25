@@ -76,7 +76,7 @@ place than a generic graph layout.
 ### Event-driven architecture
 
 The simulation engine does not depend on any specific visualizer. Instead, it
-emits typed events such as `TurnStarted`, `AgentMoved`, `AgentRefueling`,
+emits typed events such as `TurnStarted`, `AgentMoved`, `AgentInTransit`,
 `CapacitySnapshot`, and `WeatherChanged`. Console output, capacity reporting,
 the standard viewer, and the aviation viewer subscribe to the same event flow.
 
@@ -112,6 +112,10 @@ capacity at the arrival turn and whether the connection remains available for
 the entire transit duration. Waiting in place is also considered as a valid
 move, which is important when a drone must avoid a temporary conflict instead
 of taking a worse route.
+
+For distance-based routes, the planner also reserves departure timing. This
+means a long-haul route can allow several drones in transit while still spacing
+departures so downstream bottlenecks do not immediately create conflicts.
 
 The cost model combines:
 
@@ -223,6 +227,12 @@ The visual layers are useful for more than presentation. They make occupancy,
 delays, route choices, and bottlenecks easier to understand while debugging the
 algorithm, especially on maps where several drones interact at once.
 
+The two Pygame viewers share small helper code in `pygame_common.py`: common
+colors, dimensions, sprite loading, count badges, event collection, and the
+display position model. View-specific layout and styling stay inside
+`pygame_standard.py` and `pygame_airlines.py`, so the shared module stays small
+instead of becoming a UI framework.
+
 ## Development
 
 Run linting and type checks:
@@ -231,6 +241,9 @@ Run linting and type checks:
 make lint
 make lint-strict
 ```
+
+The `Makefile` lint target covers the simulator, parser, visualizers, and the
+shared Pygame helper module.
 
 Clean generated files:
 

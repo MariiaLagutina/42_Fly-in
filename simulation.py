@@ -119,6 +119,10 @@ class Simulator:
         return all(drone.is_delivered() for drone in self.drones)
 
     def _execute_turn(self, turn_number: int) -> SimulationTurn:
+        """
+        A turn is processed in phases: finish existing transit, plan departures
+        from a stable snapshot, then apply moves that pass capacity checks.
+        """
         turn = SimulationTurn(turn_number)
         self._emit(TurnStarted(turn_number))
         if self.enable_dynamic_weather:
@@ -127,9 +131,40 @@ class Simulator:
         zone_occupancy = self._count_zone_occupancy()
         connection_usage = self._count_active_connection_usage()
         moved_drone_ids: set[int] = set()
-        planned_moves: list[tuple[Drone, Connection]] = []
-        departed_this_turn: set[str] = set()
 
+        self._finish_in_transit_drones(
+            turn, turn_number, zone_occupancy, moved_drone_ids
+        )
+
+        planned_moves = self._plan_departures(
+            connection_usage, moved_drone_ids
+        )
+
+        outgoing_counts = self._count_outgoing_by_zone(planned_moves)
+
+        self._apply_planned_moves(
+            turn,
+            turn_number,
+            planned_moves,
+            zone_occupancy,
+            moved_drone_ids,
+            outgoing_counts,
+            connection_usage,
+        )
+
+        self._emit(TurnFinished(turn_number, tuple(turn.movements)))
+        self._emit_capacity_snapshot(
+            turn_number, zone_occupancy, connection_usage
+        )
+        return turn
+
+    def _finish_in_transit_drones(
+        self,
+        turn: SimulationTurn,
+        turn_number: int,
+        zone_occupancy: dict[str, int],
+        moved_drone_ids: set[int],
+    ) -> None:
         for drone in self.drones:
             if drone.state != DroneState.IN_TRANSIT:
                 continue
@@ -165,6 +200,12 @@ class Simulator:
                 )
             )
             moved_drone_ids.add(drone.drone_id)
+
+    def _plan_departures(
+        self, connection_usage: dict[str, int], moved_drone_ids: set[int]
+    ) -> list[tuple[Drone, Connection]]:
+        planned_moves: list[tuple[Drone, Connection]] = []
+        departed_this_turn: set[str] = set()
 
         for drone in self.drones:
             if (
@@ -202,12 +243,29 @@ class Simulator:
                 departed_this_turn.add(conn_name)
             planned_moves.append((drone, connection))
 
+        return planned_moves
+
+    def _count_outgoing_by_zone(
+        self, planned_moves: list[tuple[Drone, Connection]]
+    ) -> dict[str, int]:
         outgoing_counts: dict[str, int] = {}
         for drone, _connection in planned_moves:
             name = drone.current_zone.name
             outgoing_counts[name] = outgoing_counts.get(name, 0) + 1
+        return outgoing_counts
 
+    def _apply_planned_moves(
+        self,
+        turn: SimulationTurn,
+        turn_number: int,
+        planned_moves: list[tuple[Drone, Connection]],
+        zone_occupancy: dict[str, int],
+        moved_drone_ids: set[int],
+        outgoing_counts: dict[str, int],
+        connection_usage: dict[str, int],
+    ) -> None:
         incoming_counts: dict[str, int] = {}
+
         for drone, connection in planned_moves:
             next_zone = drone.next_zone()
             if next_zone is None:
@@ -219,12 +277,14 @@ class Simulator:
             available_count = current_count - outgoing + incoming
 
             if available_count >= next_zone.effective_capacity():
+                conn_name = connection.name()
+                if connection_usage.get(conn_name, 0) > 0:
+                    connection_usage[conn_name] -= 1
                 continue
 
             zone_occupancy[drone.current_zone.name] -= 1
 
-            # Replaced the redundant _calculate_transit_time with our
-            # clean pathfinder method
+            # Pathfinder owns distance and weather travel-time rules.
             transit_time = self.pathfinder._calculate_move_cost(
                 drone.current_zone, next_zone
             )
@@ -274,12 +334,6 @@ class Simulator:
                 )
             )
             moved_drone_ids.add(drone.drone_id)
-
-        self._emit(TurnFinished(turn_number, tuple(turn.movements)))
-        self._emit_capacity_snapshot(
-            turn_number, zone_occupancy, connection_usage
-        )
-        return turn
 
     def _emit(self, event: SimulationEvent) -> None:
         if self.dispatcher is not None:

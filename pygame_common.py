@@ -7,12 +7,26 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Optional
 
+from events import EventListener, SimulationEvent
+from graph import Graph
+
 # Shared path for assets
 IMG_DIR = Path(__file__).resolve().parent / "img"
 
 # Shared Types
 PositionKind = Literal["zone", "connection"]
 Point = tuple[int, int]
+
+
+class PygameEventCollector(EventListener):
+    """Base class for collecting simulation events for pygame visualizers."""
+
+    def __init__(self, graph: Graph) -> None:
+        self.graph = graph
+        self.event_queue: list[SimulationEvent] = []
+
+    def handle(self, event: SimulationEvent) -> None:
+        self.event_queue.append(event)
 
 
 @dataclass(frozen=True)
@@ -45,6 +59,7 @@ class UIColors:
     ZONE_BORDER = (45, 55, 72)
     SLATE_BG = (155, 170, 185)
     HIGHLIGHT = (143, 211, 255)
+    LINE_DEFAULT = (35, 45, 55)
 
 
 class UIConstants:
@@ -61,6 +76,9 @@ class UIConstants:
     BADGE_RADIUS_MIN = 8
     BADGE_OFFSET_X = 12
     BADGE_OFFSET_Y = -12
+    LINE_THICKNESS_DEFAULT = 3
+    LINE_THICKNESS_ACTIVE = 5
+    NODE_RADIUS = 16
 
 
 # Moved from pygame_standard for shared map coloring
@@ -87,13 +105,20 @@ PYGAME_ZONE_COLORS = {
 def draw_count_badge(
     screen: pygame.Surface, font: pygame.font.Font, point: Point, count: int
 ) -> None:
-    """Only draw a badge for grouped drones; a single vehicle icon is already enough."""
+    """Single vehicles do not need a badge; the badge only explains grouped
+    drones at the same screen point."""
     if count <= 1:
         return
 
     count_surf = font.render(str(count), True, UIColors.WHITE)
-    badge_radius = max(UIConstants.BADGE_RADIUS_MIN, count_surf.get_width() // 2 + 3)
-    badge_pos = (point[0] + UIConstants.BADGE_OFFSET_X, point[1] + UIConstants.BADGE_OFFSET_Y)
+    badge_radius = max(
+        UIConstants.BADGE_RADIUS_MIN,
+        count_surf.get_width() // 2 + 3,
+    )
+    badge_pos = (
+        point[0] + UIConstants.BADGE_OFFSET_X,
+        point[1] + UIConstants.BADGE_OFFSET_Y,
+    )
 
     pygame.draw.circle(screen, UIColors.RED, badge_pos, badge_radius)
     pygame.draw.circle(screen, UIColors.WHITE, badge_pos, badge_radius, 1)
@@ -106,7 +131,9 @@ def draw_count_badge(
 
 
 def load_sprite(
-    filename: str, size: Point, color_key: Optional[tuple[int, int, int]] = None
+    filename: str,
+    size: Point,
+    color_key: Optional[tuple[int, int, int]] = None,
 ) -> Optional[pygame.Surface]:
     """Loads an image, optionally sets a color key, and scales it."""
     try:
@@ -154,7 +181,7 @@ def load_outlined_sprite(
 
 
 def load_scaled_image(filename: str, size: Point) -> Optional[pygame.Surface]:
-    """Loads an image and scales it without modifying color keys or alpha masks."""
+    """Loads and scales an image without changing color keys or alpha masks."""
     try:
         image = pygame.image.load(IMG_DIR / filename).convert_alpha()
         return pygame.transform.scale(image, size)

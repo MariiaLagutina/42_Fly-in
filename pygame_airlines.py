@@ -7,13 +7,13 @@ from typing import Optional, TypedDict
 from events import (
     AgentMoved,
     AgentInTransit,
-    EventListener,
     SimulationEvent,
     WeatherChanged,
     TurnStarted,
 )
-from graph import Graph
+from connection import Connection
 from pygame_common import (
+    PygameEventCollector,
     DroneDisplayPosition,
     UIColors,
     UIConstants,
@@ -23,6 +23,7 @@ from pygame_common import (
     IMG_DIR,
     Point,
 )
+from zone import Zone
 
 
 class FlightInfo(TypedDict):
@@ -32,21 +33,15 @@ class FlightInfo(TypedDict):
     status: str
 
 
-class PygameAirlinesVisualizer(EventListener):
+class PygameAirlinesVisualizer(PygameEventCollector):
     """Collects simulation events for airlines visualization."""
-
-    def __init__(self, graph: Graph) -> None:
-        self.graph = graph
-        self.event_queue: list[SimulationEvent] = []
-
-    def handle(self, event: SimulationEvent) -> None:
-        self.event_queue.append(event)
+    pass
 
 
 class AirlinesWindow:
     """Main window for the airlines visualization and control panel."""
 
-    # Airlines-specific dark theme colors (kept local to avoid polluting UIColors)
+    # Airlines-specific dark theme colors stay local to this view.
     COLOR_SIDEBAR_BG = (25, 32, 42)
     COLOR_SIDEBAR_BORDER = (55, 68, 85)
     COLOR_CARD_BG = (35, 45, 60)
@@ -56,15 +51,27 @@ class AirlinesWindow:
     COLOR_MUTED_DARK = (100, 110, 120)
 
     def __init__(self, visualizer: PygameAirlinesVisualizer) -> None:
-        pygame.init()
         self.visualizer = visualizer
         self.graph = visualizer.graph
 
+        self._setup_layout()
+        self._setup_pygame()
+        self._load_assets()
+        self.start_hub_name = self._find_start_hub_name()
+        self._initialize_flight_data()
+        self._build_turn_indices()
+        self._setup_playback_state()
+
+        self._goto_turn(0)
+
+    def _setup_layout(self) -> None:
         self.map_width = 1000
         self.sidebar_width = 350
         self.width = self.map_width + self.sidebar_width
         self.height = UIConstants.STANDARD_HEIGHT
 
+    def _setup_pygame(self) -> None:
+        pygame.init()
         self.screen = pygame.display.set_mode((self.width, self.height))
         pygame.display.set_caption("Fly-in: Global Logistics")
         self.clock = pygame.time.Clock()
@@ -73,14 +80,14 @@ class AirlinesWindow:
         self.dashboard_font = pygame.font.SysFont("Courier", 13, bold=True)
         self.badge_font = pygame.font.SysFont("Arial", 12, bold=True)
 
+    def _load_assets(self) -> None:
         self.bg_image = self._load_background()
-
-        # Using centralized load helpers
         self.drone_sprite = load_outlined_sprite("drone.png", (26, 26))
         self.car_sprite = load_outlined_sprite("car.png", (25, 25))
         self.icons = self._load_weather_icons()
 
-        self.start_hub_name = next(
+    def _find_start_hub_name(self) -> Optional[str]:
+        return next(
             (
                 z.name
                 for z in self.graph.zones.values()
@@ -89,11 +96,14 @@ class AirlinesWindow:
             None,
         )
 
+    def _initialize_flight_data(self) -> None:
         self.flight_data: dict[str, FlightInfo] = {}
         for event in self.visualizer.event_queue:
             if hasattr(event, "agent_label"):
                 self._get_flight_info(event.agent_label)
 
+    def _build_turn_indices(self) -> None:
+        """Let the UI seek by turn without replaying the simulator."""
         self.turn_indices = [
             i
             for i, e in enumerate(self.visualizer.event_queue)
@@ -104,13 +114,12 @@ class AirlinesWindow:
         self.turn_indices.append(len(self.visualizer.event_queue))
         self.turn_indices = sorted(list(set(self.turn_indices)))
 
+    def _setup_playback_state(self) -> None:
         self.current_turn_index = 0
         self.current_event_index = 0
         self.is_playing = True
         self.turn_delay = UIConstants.AIRLINES_TURN_DELAY_MS
         self.last_update_time = pygame.time.get_ticks()
-
-        self._goto_turn(0)
 
     def _reset_state(self) -> None:
         self.current_turn = 0
@@ -229,96 +238,143 @@ class AirlinesWindow:
             return UIColors.GREEN, 4
         return UIColors.TEXT_MUTED, 3
 
-    def _draw_map(self) -> None:
+    def _draw_weather_icon(
+        self, connection: Connection, condition: str
+    ) -> None:
+        if condition in self.icons:
+            start = (connection.zone_a.x, connection.zone_a.y)
+            end = (connection.zone_b.x, connection.zone_b.y)
+            mid_x = (start[0] + end[0]) // 2
+            mid_y = (start[1] + end[1]) // 2
+            icon_rect = self.icons[condition].get_rect(center=(mid_x, mid_y))
+            self.screen.blit(self.icons[condition], icon_rect)
+
+    def _draw_weather_connections(self) -> None:
         for connection in self.graph.connections:
             start = (connection.zone_a.x, connection.zone_a.y)
             end = (connection.zone_b.x, connection.zone_b.y)
             condition = self.connection_weather.get(connection.name(), "clear")
             color, thickness = self._weather_style(condition)
             pygame.draw.line(self.screen, color, start, end, thickness)
+            self._draw_weather_icon(connection, condition)
 
-            if condition in self.icons:
-                mid_x = (start[0] + end[0]) // 2
-                mid_y = (start[1] + end[1]) // 2
-                icon_rect = self.icons[condition].get_rect(
-                    center=(mid_x, mid_y)
-                )
-                self.screen.blit(self.icons[condition], icon_rect)
+    def _draw_city_name(self, zone: Zone) -> None:
+        shadow = self.city_font.render(zone.name, True, UIColors.BLACK)
+        self.screen.blit(shadow, (zone.x + 11, zone.y - 14))
+        text = self.city_font.render(zone.name, True, UIColors.WHITE)
+        self.screen.blit(text, (zone.x + 10, zone.y - 15))
+
+    def _draw_population_label(self, zone: Zone) -> None:
+        pop = getattr(zone, "population", 500000)
+        if pop == 0:
+            pop = 500000
+
+        pop_str = self._format_population(pop)
+
+        # Border text for readability
+        border_text = self.badge_font.render(pop_str, True, UIColors.WHITE)
+        self.screen.blit(border_text, (zone.x + 9, zone.y + 4))
+        self.screen.blit(border_text, (zone.x + 11, zone.y + 4))
+        self.screen.blit(border_text, (zone.x + 10, zone.y + 3))
+        self.screen.blit(border_text, (zone.x + 10, zone.y + 5))
+
+        # Main text
+        pop_text = self.badge_font.render(pop_str, True, (64, 64, 64))
+        self.screen.blit(pop_text, (zone.x + 10, zone.y + 4))
+
+    def _draw_city(self, zone: Zone) -> None:
+        """
+        Airlines mode uses the map coordinates directly; standard mode rescales
+        coordinates into a viewport.
+        """
+        pop = getattr(zone, "population", 500000)
+        if pop == 0:
+            pop = 500000
+
+        node_color = self._get_city_color(pop)
+
+        pygame.draw.circle(self.screen, node_color, (zone.x, zone.y), 10)
+        pygame.draw.circle(
+            self.screen, UIColors.WHITE, (zone.x, zone.y), 10, 1
+        )
+
+        self._draw_city_name(zone)
+        self._draw_population_label(zone)
+
+    def _draw_map(self) -> None:
+        self._draw_weather_connections()
 
         for zone in self.graph.zones.values():
-            pop = getattr(zone, "population", 500000)
-            if pop == 0:
-                pop = 500000
+            self._draw_city(zone)
 
-            node_color = self._get_city_color(pop)
+    def _zone_points(self) -> dict[str, Point]:
+        return {z.name: (z.x, z.y) for z in self.graph.zones.values()}
 
-            pygame.draw.circle(self.screen, node_color, (zone.x, zone.y), 10)
-            pygame.draw.circle(
-                self.screen, UIColors.WHITE, (zone.x, zone.y), 10, 1
-            )
+    def _resolve_drone_point(
+        self, pos: DroneDisplayPosition, raw_positions: dict[str, Point]
+    ) -> Optional[Point]:
+        first = raw_positions.get(pos.first_zone)
+        if first is None:
+            return None
 
-            shadow = self.city_font.render(zone.name, True, UIColors.BLACK)
-            self.screen.blit(shadow, (zone.x + 11, zone.y - 14))
-            text = self.city_font.render(zone.name, True, UIColors.WHITE)
-            self.screen.blit(text, (zone.x + 10, zone.y - 15))
+        if pos.kind == "zone" or pos.second_zone is None:
+            return first
 
-            pop_str = self._format_population(pop)
-            border_text = self.badge_font.render(
-                pop_str, True, UIColors.WHITE
-            )
-            self.screen.blit(border_text, (zone.x + 9, zone.y + 4))
-            self.screen.blit(border_text, (zone.x + 11, zone.y + 4))
-            self.screen.blit(border_text, (zone.x + 10, zone.y + 3))
-            self.screen.blit(border_text, (zone.x + 10, zone.y + 5))
+        second = raw_positions.get(pos.second_zone)
+        if second is None:
+            return None
 
-            pop_text = self.badge_font.render(pop_str, True, (64, 64, 64))
-            self.screen.blit(pop_text, (zone.x + 10, zone.y + 4))
+        return ((first[0] + second[0]) // 2, (first[1] + second[1]) // 2)
 
-    def _draw_drones(self) -> None:
-        raw_positions: dict[str, Point] = {
-            z.name: (z.x, z.y) for z in self.graph.zones.values()
-        }
+    def _is_road_segment(self, first_zone: str, second_zone: str) -> bool:
+        """
+        Transport type is presentation logic here; simulation still uses the
+        same connection and movement events.
+        """
+        zone_a = self.graph.get_zone(first_zone)
+        zone_b = self.graph.get_zone(second_zone)
+        if zone_a and zone_b:
+            conn = self.graph.get_connection(zone_a, zone_b)
+            if conn and 0 < conn.distance < 200:
+                return True
+        return False
 
-        drone_groups: dict[tuple[Point, bool], list[str]] = {}
+    def _group_vehicles_by_point(self) -> dict[tuple[Point, bool], list[str]]:
+        raw_positions = self._zone_points()
+        groups: dict[tuple[Point, bool], list[str]] = {}
 
         for label, pos in self.drone_positions.items():
-            first = raw_positions.get(pos.first_zone)
-            if first is None:
+            point = self._resolve_drone_point(pos, raw_positions)
+            if point is None:
                 continue
 
-            if pos.kind == "zone" or pos.second_zone is None:
-                point = first
-                is_car = False
-            else:
-                second = raw_positions.get(pos.second_zone)
-                if second is None:
-                    continue
-                point = (
-                    (first[0] + second[0]) // 2,
-                    (first[1] + second[1]) // 2,
-                )
+            is_car = False
+            if pos.kind == "connection" and pos.second_zone:
+                is_car = self._is_road_segment(pos.first_zone, pos.second_zone)
 
-                is_car = False
-                zone_a = self.graph.get_zone(pos.first_zone)
-                zone_b = self.graph.get_zone(pos.second_zone)
-                if zone_a and zone_b:
-                    conn = self.graph.get_connection(zone_a, zone_b)
-                    if conn and 0 < conn.distance < 200:
-                        is_car = True
+            groups.setdefault((point, is_car), []).append(label)
 
-            drone_groups.setdefault((point, is_car), []).append(label)
+        return groups
+
+    def _draw_vehicle_group(
+        self, point: Point, is_car: bool, labels: list[str]
+    ) -> None:
+        sprite_to_draw = self.car_sprite if is_car else self.drone_sprite
+
+        if sprite_to_draw:
+            sprite_rect = sprite_to_draw.get_rect(center=point)
+            self.screen.blit(sprite_to_draw, sprite_rect)
+        else:
+            fallback_color = UIColors.BLUE if is_car else UIColors.YELLOW
+            pygame.draw.circle(self.screen, fallback_color, point, 8)
+
+        draw_count_badge(self.screen, self.badge_font, point, len(labels))
+
+    def _draw_drones(self) -> None:
+        drone_groups = self._group_vehicles_by_point()
 
         for (point, is_car), labels in drone_groups.items():
-            sprite_to_draw = self.car_sprite if is_car else self.drone_sprite
-
-            if sprite_to_draw:
-                sprite_rect = sprite_to_draw.get_rect(center=point)
-                self.screen.blit(sprite_to_draw, sprite_rect)
-            else:
-                fallback_color = UIColors.BLUE if is_car else UIColors.YELLOW
-                pygame.draw.circle(self.screen, fallback_color, point, 8)
-
-            draw_count_badge(self.screen, self.badge_font, point, len(labels))
+            self._draw_vehicle_group(point, is_car, labels)
 
     def _draw_map_controls(self) -> None:
         overlay_rect = pygame.Rect(20, self.height - 75, 410, 55)
@@ -360,20 +416,27 @@ class AirlinesWindow:
         self.screen.blit(controls_1, (135, self.height - 66))
         self.screen.blit(controls_2, (135, self.height - 46))
 
-    def _draw_sidebar(self) -> None:
+    def _draw_sidebar_background(self) -> None:
         sb_x = self.map_width
-
         pygame.draw.rect(
             self.screen,
             self.COLOR_SIDEBAR_BG,
             (sb_x, 0, self.sidebar_width, self.height),
         )
         pygame.draw.line(
-            self.screen, self.COLOR_SIDEBAR_BORDER, (sb_x, 0), (sb_x, self.height), 2
+            self.screen,
+            self.COLOR_SIDEBAR_BORDER,
+            (sb_x, 0),
+            (sb_x, self.height),
+            2,
         )
 
+    def _draw_sidebar_header(self) -> int:
+        sb_x = self.map_width
         y = 25
-        title = self.city_font.render("DISPATCH CENTER", True, UIColors.TEXT_LIGHT)
+        title = self.city_font.render(
+            "DISPATCH CENTER", True, UIColors.TEXT_LIGHT
+        )
         self.screen.blit(title, (sb_x + 20, y))
         y += 40
 
@@ -387,24 +450,102 @@ class AirlinesWindow:
             f"CURRENT TURN: {self.current_turn}", True, UIColors.YELLOW
         )
         self.screen.blit(turn_text, (sb_x + 25, y + 8))
-        y += 55
+        return y + 55
 
-        if self.connection_weather:
-            w_title = self.dashboard_font.render(
-                "WEATHER ALERTS", True, UIColors.RED
-            )
-            self.screen.blit(w_title, (sb_x + 20, y))
-            y += 20
-            for conn_name, cond in self.connection_weather.items():
-                if cond != "clear":
-                    w_color, _ = self._weather_style(cond)
-                    c_text = self.dashboard_font.render(
-                        f"{conn_name}: {cond.upper()}", True, w_color
-                    )
-                    self.screen.blit(c_text, (sb_x + 25, y))
-                    y += 18
-            y += 15
+    def _draw_weather_alerts(self, y: int) -> int:
+        if not self.connection_weather:
+            return y
 
+        sb_x = self.map_width
+        w_title = self.dashboard_font.render(
+            "WEATHER ALERTS", True, UIColors.RED
+        )
+        self.screen.blit(w_title, (sb_x + 20, y))
+        y += 20
+
+        for conn_name, cond in self.connection_weather.items():
+            if cond != "clear":
+                w_color, _ = self._weather_style(cond)
+                c_text = self.dashboard_font.render(
+                    f"{conn_name}: {cond.upper()}", True, w_color
+                )
+                self.screen.blit(c_text, (sb_x + 25, y))
+                y += 18
+        return y + 15
+
+    def _determine_flight_status(
+        self, info: FlightInfo
+    ) -> tuple[str, tuple[int, int, int]]:
+        """
+        Status text is presentation-only. The real route state comes from
+        replayed simulation events.
+        """
+        if info["status"] != "En Route":
+            return "LANDED", UIColors.YELLOW
+
+        zone_a = self.graph.get_zone(info["origin"])
+        zone_b = self.graph.get_zone(info["dest"])
+
+        if zone_a and zone_b:
+            conn = self.graph.get_connection(zone_a, zone_b)
+            if conn:
+                current_weather = self.connection_weather.get(
+                    conn.name(), "clear"
+                )
+
+                if conn.distance < 200:
+                    if current_weather in ("storm", "snow"):
+                        return "ROAD DELAY", UIColors.RED
+                    return "DRIVING", UIColors.BLUE
+                else:
+                    if current_weather in ("storm", "snow"):
+                        return "DELAYED", UIColors.RED
+
+        return "EN ROUTE", UIColors.GREEN
+
+    def _draw_departure_card(
+        self,
+        y: int,
+        drone_label: str,
+        info: FlightInfo,
+        status_str: str,
+        status_color: tuple[int, int, int],
+    ) -> None:
+        sb_x = self.map_width
+        f_num = info["flight"]
+        route = f"{info['origin']} -> {info['dest']}"
+
+        card_rect = pygame.Rect(sb_x + 15, y, self.sidebar_width - 30, 50)
+        pygame.draw.rect(
+            self.screen, self.COLOR_CARD_BG, card_rect, border_radius=4
+        )
+
+        flight_surf = self.city_font.render(f_num, True, UIColors.WHITE)
+        self.screen.blit(flight_surf, (sb_x + 25, y + 7))
+
+        drone_id_surf = self.badge_font.render(
+            f"({drone_label})", True, UIColors.TEXT_MUTED
+        )
+        self.screen.blit(
+            drone_id_surf, (sb_x + 30 + flight_surf.get_width(), y + 10)
+        )
+
+        status_surf = self.badge_font.render(status_str, True, status_color)
+        self.screen.blit(
+            status_surf,
+            (
+                sb_x + self.sidebar_width - 25 - status_surf.get_width(),
+                y + 10,
+            ),
+        )
+
+        route_surf = self.dashboard_font.render(
+            route, True, UIColors.TEXT_MUTED
+        )
+        self.screen.blit(route_surf, (sb_x + 25, y + 28))
+
+    def _draw_live_departures(self, y: int) -> None:
+        sb_x = self.map_width
         f_title = self.city_font.render("LIVE DEPARTURES", True, UIColors.CYAN)
         self.screen.blit(f_title, (sb_x + 20, y))
         pygame.draw.line(
@@ -422,69 +563,10 @@ class AirlinesWindow:
             ):
                 continue
 
-            f_num = info["flight"]
-            route = f"{info['origin']} -> {info['dest']}"
-
-            status_str = "EN ROUTE"
-            status_color = UIColors.GREEN
-
-            if info["status"] == "En Route":
-                zone_a = self.graph.get_zone(info["origin"])
-                zone_b = self.graph.get_zone(info["dest"])
-                if zone_a and zone_b:
-                    conn = self.graph.get_connection(zone_a, zone_b)
-                    if conn:
-                        current_weather = self.connection_weather.get(
-                            conn.name(), "clear"
-                        )
-
-                        if conn.distance < 200:
-                            if current_weather in ("storm", "snow"):
-                                status_str = "ROAD DELAY"
-                                status_color = UIColors.RED
-                            else:
-                                status_str = "DRIVING"
-                                status_color = UIColors.BLUE
-                        else:
-                            if current_weather in ("storm", "snow"):
-                                status_str = "DELAYED"
-                                status_color = UIColors.RED
-            else:
-                status_str = "LANDED"
-                status_color = UIColors.YELLOW
-
-            card_rect = pygame.Rect(
-                sb_x + 15, y, self.sidebar_width - 30, 50
+            status_str, status_color = self._determine_flight_status(info)
+            self._draw_departure_card(
+                y, drone_label, info, status_str, status_color
             )
-            pygame.draw.rect(
-                self.screen, self.COLOR_CARD_BG, card_rect, border_radius=4
-            )
-
-            flight_surf = self.city_font.render(f_num, True, UIColors.WHITE)
-            self.screen.blit(flight_surf, (sb_x + 25, y + 7))
-
-            drone_id_surf = self.badge_font.render(
-                f"({drone_label})", True, UIColors.TEXT_MUTED
-            )
-            self.screen.blit(
-                drone_id_surf, (sb_x + 30 + flight_surf.get_width(), y + 10)
-            )
-
-            status_surf = self.badge_font.render(
-                status_str, True, status_color
-            )
-            self.screen.blit(
-                status_surf,
-                (
-                    sb_x + self.sidebar_width - 25 - status_surf.get_width(),
-                    y + 10,
-                ),
-            )
-
-            route_surf = self.dashboard_font.render(
-                route, True, UIColors.TEXT_MUTED
-            )
-            self.screen.blit(route_surf, (sb_x + 25, y + 28))
 
             y += 60
             if y > self.height - 60:
@@ -493,6 +575,12 @@ class AirlinesWindow:
                 )
                 self.screen.blit(more_surf, (sb_x + 25, y))
                 break
+
+    def _draw_sidebar(self) -> None:
+        self._draw_sidebar_background()
+        y = self._draw_sidebar_header()
+        y = self._draw_weather_alerts(y)
+        self._draw_live_departures(y)
 
     def run_loop(self) -> None:
         running = True
