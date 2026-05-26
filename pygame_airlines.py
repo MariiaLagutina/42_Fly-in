@@ -1,6 +1,7 @@
 import random
 import string
 import sys
+import math
 import pygame
 from typing import Optional, TypedDict
 
@@ -591,7 +592,43 @@ class AirlinesWindow:
                 if event.type == pygame.QUIT:
                     running = False
                 elif event.type == pygame.MOUSEBUTTONDOWN:
-                    print(f"Coordinates: {event.pos[0]} {event.pos[1]}")
+                    occupancy: dict[str, int] = {}
+                    for pos_info in self.drone_positions.values():
+                        if pos_info.kind == "zone":
+                            occupancy[pos_info.first_zone] = (
+                                occupancy.get(pos_info.first_zone, 0) + 1
+                            )
+
+                    click_x, click_y = event.pos
+                    for zone in self.graph.zones.values():
+                        distance = math.hypot(
+                            zone.x - click_x,
+                            zone.y - click_y,
+                        )
+
+                        if distance <= 15:
+                            current_pop = occupancy.get(zone.name, 0)
+                            max_cap = zone.effective_capacity()
+                            max_cap_str = (
+                                "INF"
+                                if max_cap == float("inf")
+                                else str(max_cap)
+                            )
+
+                            print(f"\n[ATC HUB REPORT: {zone.name.upper()}]")
+                            print(
+                                "  -> Regional Population: "
+                                f"{getattr(zone, 'population', 'N/A')}"
+                            )
+                            print(
+                                "  -> Logistics Type:      "
+                                f"{zone.zone_type.value.upper()}"
+                            )
+                            print(
+                                "  -> Traffic Load:        "
+                                f"{current_pop} / {max_cap_str} drones"
+                            )
+                            break
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_SPACE:
                         self.is_playing = not self.is_playing

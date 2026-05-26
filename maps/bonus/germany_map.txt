@@ -5,26 +5,26 @@ nb_drones: 10
 
 # --- NORTH ---
 start_hub: Kiel 450 100 [color=kiel max_drones=10 population=246000]
-hub: Hamburg 470 190 [zone=priority color=hamburg max_drones=3 population=1899000]
+hub: Hamburg 470 190 [zone=priority color=hamburg population=1899000]
 hub: Schwerin 570 180 [color=schwerin population=96000]
 hub: Bremen 380 230 [color=bremen population=569000]
 
 # --- EAST ---
-hub: Berlin 715 290 [zone=priority color=berlin max_drones=4 population=3677000]
+hub: Berlin 715 290 [zone=priority color=berlin population=3677000]
 hub: Potsdam 690 310 [color=potsdam population=183000]
 hub: Magdeburg 590 330 [color=magdeburg population=236000]
 hub: Dresden 750 420 [color=dresden population=556000]
 hub: Erfurt 540 440 [color=erfurt population=214000]
 
 # --- WEST & CENTRAL ---
-hub: Hanover 450 300 [color=hanover max_drones=2]
-hub: Dusseldorf 250 400 [color=dusseldorf max_drones=3 population=620000]
+hub: Hanover 450 300 [color=hanover population=548000]
+hub: Dusseldorf 250 400 [color=dusseldorf population=620000]
 hub: Frankfurt 370 510 [color=frankfurt max_drones=10 population=764000]
 hub: Mainz 330 530 [color=mainz population=217000]
 
 # --- SOUTH & SOUTHWEST ---
 hub: Saarbrucken 240 590 [zone=restricted color=saarbrucken population=180000]
-hub: Stuttgart 410 630 [color=stuttgart max_drones=3 population=630000]
+hub: Stuttgart 410 630 [color=stuttgart population=630000]
 end_hub: Munich 560 690 [color=munich max_drones=10 population=1488000]
 
 # === FLIGHT ROUTES ===
