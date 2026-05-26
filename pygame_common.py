@@ -55,7 +55,7 @@ class UIColors:
 
     DARK_PANEL = (31, 38, 46)
     TEXT_LIGHT = (230, 237, 245)
-    TEXT_MUTED = (140, 152, 168)
+    TEXT_MUTED = (100, 110, 120)
     ZONE_BORDER = (45, 55, 72)
     SLATE_BG = (155, 170, 185)
     HIGHLIGHT = (143, 211, 255)
