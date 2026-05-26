@@ -103,7 +103,10 @@ PYGAME_ZONE_COLORS = {
 
 
 def draw_count_badge(
-    screen: pygame.Surface, font: pygame.font.Font, point: Point, count: int
+    screen: pygame.surface.Surface,
+    font: pygame.font.Font,
+    point: Point,
+    count: int,
 ) -> None:
     """Single vehicles do not need a badge; the badge only explains grouped
     drones at the same screen point."""
@@ -134,7 +137,7 @@ def load_sprite(
     filename: str,
     size: Point,
     color_key: Optional[tuple[int, int, int]] = None,
-) -> Optional[pygame.Surface]:
+) -> Optional[pygame.surface.Surface]:
     """Loads an image, optionally sets a color key, and scales it."""
     try:
         sprite = pygame.image.load(IMG_DIR / filename).convert_alpha()
@@ -147,7 +150,7 @@ def load_sprite(
 
 def load_outlined_sprite(
     filename: str, size: Point, final_size: Point = (32, 32)
-) -> Optional[pygame.Surface]:
+) -> Optional[pygame.surface.Surface]:
     """
     The outline is generated from the sprite alpha mask so map icons stay
     readable over busy backgrounds.
@@ -180,7 +183,8 @@ def load_outlined_sprite(
         return None
 
 
-def load_scaled_image(filename: str, size: Point) -> Optional[pygame.Surface]:
+def load_scaled_image(filename: str, size: Point
+                      ) -> Optional[pygame.surface.Surface]:
     """Loads and scales an image without changing color keys or alpha masks."""
     try:
         image = pygame.image.load(IMG_DIR / filename).convert_alpha()

@@ -161,7 +161,7 @@ class AirlinesWindow:
             return f"{population/1000000:.1f}M"
         return f"{population//1000}K"
 
-    def _load_background(self) -> Optional[pygame.Surface]:
+    def _load_background(self) -> Optional[pygame.surface.Surface]:
         bg_image_name = "germany.png"
         for arg in sys.argv:
             if "europa" in arg.lower():
@@ -172,7 +172,7 @@ class AirlinesWindow:
         except FileNotFoundError:
             return None
 
-    def _load_weather_icons(self) -> dict[str, pygame.Surface]:
+    def _load_weather_icons(self) -> dict[str, pygame.surface.Surface]:
         icons = {}
         files = [
             ("storm", "storm.png"),
