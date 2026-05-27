@@ -110,6 +110,9 @@ class Pathfinder:
         global_usage: dict[str, int],
     ) -> list[Zone]:
         """Calculates optimal conflict-free routes considering constraints."""
+        if not self.find_path_bfs(start, end):
+            return []
+
         visited: set[tuple[str, int]] = set()
         counter = 0
         min_heap: list[TimedPathHeapItem] = [(0.0, counter, 0, start, [start])]

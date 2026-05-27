@@ -61,7 +61,11 @@ def main() -> None:
         dispatcher,
         enable_dynamic_weather=args.pygame_airlines,
     )
-    turns = simulator.run()
+    try:
+        turns = simulator.run()
+    except RuntimeError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return
 
     if standard_visualizer is not None:
         from pygame_standard import run_pygame_standard

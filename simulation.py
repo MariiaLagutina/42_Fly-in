@@ -73,6 +73,11 @@ class Simulator:
                 global_usage,
             )
 
+            if not path:
+                raise RuntimeError(
+                    "No valid route found between start and end zones."
+                )
+
             drone.path = path[1:] if path else []
             t = 0
             for i in range(len(path) - 1):
