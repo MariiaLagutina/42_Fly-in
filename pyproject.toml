@@ -1,0 +1,37 @@
+[project]
+name = "marias-airlanes"
+version = "0.1.0"
+description = "Turn-based air-traffic simulation with capacity-aware routing, weather, and a Pygame dispatch center."
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "Mariia Lagutina" }]
+requires-python = ">=3.10"
+dependencies = [
+    "pygame-ce>=2.5.8",
+]
+
+[dependency-groups]
+dev = [
+    "flake8>=7.4.1",
+    "mypy>=2.4.0",
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = ["-ra", "--strict-markers", "--strict-config"]
+
+[tool.coverage.run]
+source = ["."]
+omit = ["tests/*", ".venv/*"]
+branch = true
+patch = ["subprocess"]
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
