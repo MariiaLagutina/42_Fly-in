@@ -1,0 +1,82 @@
+"""Connection: endpoints, naming, defaults, and weather state."""
+
+import pytest
+
+from connection import Connection
+from zone import Zone
+
+
+@pytest.fixture
+def zones() -> tuple[Zone, Zone, Zone]:
+    return Zone("alpha", 0, 0), Zone("bravo", 1, 0), Zone("charlie", 2, 0)
+
+
+def test_defaults(zones: tuple[Zone, Zone, Zone]) -> None:
+    alpha, bravo, _ = zones
+    connection = Connection(alpha, bravo)
+
+    assert connection.max_link_capacity == 1
+    assert connection.distance == 0
+    assert connection.is_open is True
+    assert connection.weather_condition == "clear"
+
+
+def test_explicit_capacity(zones: tuple[Zone, Zone, Zone]) -> None:
+    alpha, bravo, _ = zones
+
+    assert Connection(alpha, bravo, 3).max_link_capacity == 3
+
+
+def test_connects_both_endpoints_only(
+    zones: tuple[Zone, Zone, Zone],
+) -> None:
+    alpha, bravo, charlie = zones
+    connection = Connection(alpha, bravo)
+
+    assert connection.connects(alpha)
+    assert connection.connects(bravo)
+    assert not connection.connects(charlie)
+
+
+def test_other_end_works_in_both_directions(
+    zones: tuple[Zone, Zone, Zone],
+) -> None:
+    alpha, bravo, _ = zones
+    connection = Connection(alpha, bravo)
+
+    assert connection.other_end(alpha) is bravo
+    assert connection.other_end(bravo) is alpha
+
+
+def test_other_end_rejects_an_unrelated_zone(
+    zones: tuple[Zone, Zone, Zone],
+) -> None:
+    alpha, bravo, charlie = zones
+
+    with pytest.raises(ValueError):
+        Connection(alpha, bravo).other_end(charlie)
+
+
+def test_name_follows_declaration_order(
+    zones: tuple[Zone, Zone, Zone],
+) -> None:
+    alpha, bravo, _ = zones
+
+    assert Connection(alpha, bravo).name() == "alpha-bravo"
+    assert Connection(bravo, alpha).name() == "bravo-alpha"
+
+
+@pytest.mark.parametrize(
+    ("condition", "is_open"),
+    [("storm", False), ("rain", True), ("clear", True)],
+)
+def test_set_weather_updates_condition_and_state(
+    zones: tuple[Zone, Zone, Zone], condition: str, is_open: bool
+) -> None:
+    alpha, bravo, _ = zones
+    connection = Connection(alpha, bravo)
+
+    connection.set_weather(condition, is_open=is_open)
+
+    assert connection.weather_condition == condition
+    assert connection.is_open is is_open
