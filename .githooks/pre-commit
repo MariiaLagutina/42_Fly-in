@@ -1,0 +1,21 @@
+#!/bin/sh
+
+# Block commits made directly on main.
+# Server-side protection lives in the GitHub ruleset; this hook catches the
+# mistake locally, before a commit exists that cannot be pushed.
+#
+# Enable with: make hooks   (runs: git config core.hooksPath .githooks)
+
+protected_branch='main'
+current_branch=$(git symbolic-ref --quiet --short HEAD)
+
+if [ "$current_branch" = "$protected_branch" ]; then
+    echo ""
+    printf "\033[0;31m[ERROR] Direct commits to '%s' are not allowed.\033[0m\n" "$protected_branch"
+    echo "Create a working branch first, for example:"
+    echo "  git switch -c docs/your-change"
+    echo ""
+    exit 1
+fi
+
+exit 0
