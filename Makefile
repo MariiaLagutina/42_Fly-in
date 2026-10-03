@@ -6,6 +6,9 @@ install:
 	uv venv
 	uv pip install flake8 mypy pygame-ce
 
+hooks:
+	git config core.hooksPath .githooks
+
 run:
 	uv run python3 main.py $(MAP)
 
