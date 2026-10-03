@@ -242,7 +242,7 @@ headless while the graphical viewers replay the same events.
 After cloning, set up the environment and enable the repository hooks once:
 
 ```sh
-make install       # create .venv and install dependencies
+make install       # create .venv and install locked dependencies (uv sync --locked)
 make hooks         # git config core.hooksPath .githooks
 ```
 
@@ -251,10 +251,17 @@ It activates `.githooks/pre-commit`, which rejects commits made directly on
 `main`.
 
 ```sh
+make test          # run the test suite
+make coverage      # run tests with a coverage report
 make lint          # flake8 + mypy
 make lint-strict   # flake8 + mypy --strict
-make clean         # remove caches and the virtual environment
+make check         # lint-strict + test
+make clean         # remove caches, coverage data, and the virtual environment
 ```
+
+Dependencies are declared in `pyproject.toml` and pinned in `uv.lock`. All
+`make` targets run with `--locked`, so they never modify `uv.lock`. After
+changing dependencies, run `uv lock`, review the diff, and commit both files.
 
 Changes reach `main` only through pull requests, and every pull request is
 squash-merged into a single commit.
