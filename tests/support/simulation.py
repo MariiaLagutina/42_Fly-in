@@ -94,6 +94,13 @@ def check_invariants(run: SimulationRun) -> list[str]:
     return _InvariantChecker(run).check()
 
 
+def peak_hub_occupancy(run: SimulationRun) -> dict[str, int]:
+    """Highest number of aircraft each hub held at the end of any turn."""
+    checker = _InvariantChecker(run)
+    checker.check()
+    return checker.peak_occupancy
+
+
 class _InvariantChecker:
     def __init__(self, run: SimulationRun) -> None:
         self.run = run
@@ -111,6 +118,7 @@ class _InvariantChecker:
         self.turn = 0
         self.moved_this_turn: set[str] = set()
         self.lane_use: dict[str, int] = {}
+        self.peak_occupancy: dict[str, int] = {}
 
     def fail(self, message: str) -> None:
         self.violations.append(f"turn {self.turn}: {message}")
@@ -246,6 +254,9 @@ class _InvariantChecker:
             if isinstance(position, str):
                 occupancy[position] = occupancy.get(position, 0) + 1
         for name, count in occupancy.items():
+            self.peak_occupancy[name] = max(
+                self.peak_occupancy.get(name, 0), count
+            )
             zone = self.graph.get_zone(name)
             assert zone is not None
             if count > zone.effective_capacity():

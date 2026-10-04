@@ -11,7 +11,11 @@ import pytest
 
 from graph import Graph
 from tests.support.graphs import Link, build_graph, end_hub, hub, start_hub
-from tests.support.simulation import check_invariants, run_simulation
+from tests.support.simulation import (
+    check_invariants,
+    peak_hub_occupancy,
+    run_simulation,
+)
 from zone import ZoneType
 
 
@@ -192,3 +196,63 @@ def test_distance_and_weather_set_travel_time(
 
     assert check_invariants(run) == []
     assert run.turn_count == expected_turns
+
+
+# --- Regression: hub capacity (BUG-001, BUG-002) ----------------------------
+# Three aircraft pass a one-slot `gate` and then a one-slot restricted hub
+# `slow`. Before the fix, an aircraft whose departure from `gate` was
+# rejected still counted as having left it, so a second aircraft moved in
+# (BUG-002); and two aircraft departing towards `slow` in the same turn did
+# not see each other as incoming, so both arrived (BUG-001). Each test checks
+# one hub, so each bug is detected independently of the other.
+
+
+def build_gate_and_restricted_hub() -> Graph:
+    return build_graph(
+        [
+            start_hub(),
+            hub("gate"),
+            hub("slow", ZoneType.RESTRICTED),
+            end_hub(),
+        ],
+        [
+            Link("start", "gate"),
+            Link("gate", "slow", capacity=2),
+            Link("slow", "goal", capacity=2),
+        ],
+    )
+
+
+def test_rejected_departure_does_not_free_its_hub() -> None:
+    """BUG-002: `gate` never holds more than its single slot."""
+    run = run_simulation(build_gate_and_restricted_hub(), 3)
+
+    assert peak_hub_occupancy(run)["gate"] <= 1
+
+
+def test_simultaneous_multi_turn_arrivals_respect_capacity() -> None:
+    """BUG-001: `slow` never holds more than its single slot."""
+    run = run_simulation(build_gate_and_restricted_hub(), 3)
+
+    assert peak_hub_occupancy(run)["slow"] <= 1
+
+
+def test_restricted_hub_with_room_for_two_is_not_overfilled() -> None:
+    """BUG-001 with a larger hub: six aircraft, a restricted hub for two."""
+    graph = build_graph(
+        [
+            start_hub(),
+            hub("slow", ZoneType.RESTRICTED, capacity=2),
+            hub("side", ZoneType.PRIORITY, capacity=3),
+            end_hub(),
+        ],
+        [
+            Link("slow", "goal", capacity=2),
+            Link("start", "side", capacity=2),
+            Link("slow", "start", capacity=3),
+        ],
+    )
+
+    run = run_simulation(graph, 6)
+
+    assert peak_hub_occupancy(run)["slow"] <= 2

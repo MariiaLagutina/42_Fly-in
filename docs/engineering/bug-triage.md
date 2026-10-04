@@ -17,12 +17,13 @@ are in [decisions.md](decisions.md).
 | `CONFIRMED` | Reproduced; no fix scheduled |
 | `PLANNED` | Fix scheduled for a specific upcoming pull request |
 | `IN PROGRESS` | Fix being implemented |
-| `FIXED` | Fix merged; regression test added |
-| `VERIFIED` | Fixed, and the regression test plus the full invariant suite pass on `main` |
+| `FIXED` | Fix and regression test implemented in the linked pull request |
+| `VERIFIED` | Fixed, and the regression test plus the full invariant suite pass |
 
-An entry moves to `FIXED` only after the fix is merged, and to `VERIFIED` only
-after its regression test and the invariant suite pass. Both updates link the
-pull request.
+An entry moves to `FIXED` only together with an actual fix and its regression
+test, and to `VERIFIED` only after the regression test and the full invariant
+suite pass. Both updates are made in the pull request that contains the fix
+and link it, so the status is true as soon as that pull request is merged.
 
 ### Severity
 
@@ -43,9 +44,9 @@ the violation precisely.
 
 | ID | Title | Status | Severity | Area |
 | --- | --- | --- | --- | --- |
-| [BUG-001](#bug-001) | Hub capacity exceeded by simultaneous multi-turn arrivals | `PLANNED` | High | Simulation execution |
-| [BUG-002](#bug-002) | Hub capacity exceeded after a rejected departure | `PLANNED` | High | Simulation execution |
-| [BUG-003](#bug-003) | Deadlock when two aircraft swap hubs over a distance lane | `CONFIRMED` | Medium | Simulation execution |
+| [BUG-001](#bug-001) | Hub capacity exceeded by simultaneous multi-turn arrivals | `VERIFIED` | High | Simulation execution |
+| [BUG-002](#bug-002) | Hub capacity exceeded after a rejected departure | `VERIFIED` | High | Simulation execution |
+| [BUG-003](#bug-003) | Deadlock between opposite-direction aircraft on a distance lane | `CONFIRMED` | Medium | Simulation execution |
 | [BUG-004](#bug-004) | Turns without printed movement are dropped from the output | `CONFIRMED` | Low | Simulation output |
 
 ---
@@ -56,13 +57,14 @@ the violation precisely.
 
 | Field | Value |
 | --- | --- |
-| Status | `PLANNED` |
+| Status | `VERIFIED` |
 | Severity | High |
 | Affected area | `simulation.py`: `Simulator._apply_planned_moves`, `Simulator._finish_in_transit_drones` |
 | Discovered during | Pathfinding and simulation test audit (PR #4), 2026-10-03 |
-| Planned resolution | Dedicated bugfix pull request right after PR #4 |
-| Regression test | Not yet. Planned in the bugfix PR. The invariant checker already detects this reproducer. |
-| Related PR | — |
+| Resolution | Fixed in PR #5: hub load counts aircraft already flying towards the hub ([ADR-008](decisions.md#adr-008)) |
+| Regression test | `test_simultaneous_multi_turn_arrivals_respect_capacity` and `test_restricted_hub_with_room_for_two_is_not_overfilled` in `tests/unit/test_simulation.py`. Both fail before the fix. |
+| Verification | Full invariant suite passes. Randomized audit of 6,000 small graphs: 474 hub-capacity violations before the fix, 0 after. Bundled map output unchanged. |
+| Related PR | PR #5 |
 
 **Violated invariant.** A hub never holds more aircraft than its `max_drones`
 at the end of a turn. An aircraft on a multi-turn leg cannot wait on the
@@ -107,6 +109,15 @@ arrive, so `slow` holds 2. Turn 3 of the same run shows [BUG-002](#bug-002).
 3. `_finish_in_transit_drones` places arriving aircraft without any capacity
    check.
 
+**Fix.** A new step, `Simulator._select_feasible_moves`, validates all planned
+moves before any is applied. A hub's load includes aircraft already in transit
+towards it, so an arrival slot is held from the moment of departure and
+arrivals can no longer overfill a hub. Each accepted move also counts towards
+its destination for later moves in the same turn.
+
+With the fix, the reproducer finishes in 8 turns, and no hub ever exceeds its
+capacity.
+
 ---
 
 ## BUG-002
@@ -115,13 +126,14 @@ arrive, so `slow` holds 2. Turn 3 of the same run shows [BUG-002](#bug-002).
 
 | Field | Value |
 | --- | --- |
-| Status | `PLANNED` |
+| Status | `VERIFIED` |
 | Severity | High |
 | Affected area | `simulation.py`: `Simulator._execute_turn`, `Simulator._apply_planned_moves` |
 | Discovered during | Pathfinding and simulation test audit (PR #4), 2026-10-03 |
-| Planned resolution | Same bugfix pull request as BUG-001 |
-| Regression test | Not yet. Planned in the bugfix PR. The invariant checker already detects this reproducer. |
-| Related PR | — |
+| Resolution | Fixed in PR #5: a hub counts as freed only by departures that are kept ([ADR-008](decisions.md#adr-008)) |
+| Regression test | `test_rejected_departure_does_not_free_its_hub` in `tests/unit/test_simulation.py`. Fails before the fix. |
+| Verification | Same as [BUG-001](#bug-001). |
+| Related PR | PR #5 |
 
 **Violated invariant.** A hub never holds more aircraft than its `max_drones`.
 A place counts as freed only by an aircraft that actually leaves.
@@ -139,18 +151,23 @@ D3 moves `start → gate` in the same turn, so `gate` (capacity 1) holds 2.
 subtracts these counts when checking a destination, including departures that
 are rejected later in the same loop.
 
+**Fix.** `Simulator._select_feasible_moves` counts a hub as freed only by
+departures that are kept. Rejecting one move can invalidate another, so the
+selection repeats until no move is rejected; it only shrinks, so it always
+terminates.
+
 ---
 
 ## BUG-003
 
-### Deadlock when two aircraft swap hubs over a distance lane
+### Deadlock between opposite-direction aircraft on a distance lane
 
 | Field | Value |
 | --- | --- |
 | Status | `CONFIRMED` |
 | Severity | Medium |
-| Affected area | `simulation.py`: `Simulator._plan_departures`, `Simulator._apply_planned_moves` |
-| Discovered during | Pathfinding and simulation test audit (PR #4), 2026-10-03 |
+| Affected area | `simulation.py`: `Simulator._plan_departures`, `Simulator._select_feasible_moves` |
+| Discovered during | Pathfinding and simulation test audit (PR #4), 2026-10-03; second variant during the BUG-001/002 fix audit (PR #5) |
 | Planned resolution | Not scheduled. The fix depends on [DECISION-002](open-decisions.md#decision-002). |
 | Regression test | Not yet |
 | Related PR | — |
@@ -158,15 +175,38 @@ are rejected later in the same loop.
 **Violated expected behavior.** A run either delivers every aircraft or stops
 promptly with a clear error when delivery is impossible.
 
-**Observed behavior.** Two aircraft, each in a full one-slot hub, need to swap
-places over the same distance-based lane. Only one departure per turn is
-allowed on such a lane, and the other hub is never freed, so neither moves.
-The run continues until the 10,000-turn safety limit raises `RuntimeError`.
+**Observed behavior.** Two aircraft need the same distance-based lane in
+opposite directions and wait for each other forever. The run continues until
+the 10,000-turn safety limit raises `RuntimeError`. Two variants are
+confirmed:
 
-**Conditions.** Seen once in 3,000 randomized small graphs, only with dynamic
+- **A. True swap.** Both aircraft sit in full one-slot hubs and each needs the
+  other's hub. They could only move if both left in the same turn.
+- **B. Wasted departure slot.** Only one direction is blocked. The aircraft
+  that cannot move takes the lane's departure slot first, and the one that
+  could move never gets it.
+
+**Conditions.** Seen in 2 of 6,000 randomized small graphs, both with dynamic
 weather enabled: weather delays push execution away from the original plan.
-This map plus `random.seed(2287)` reproduces it when the simulator runs with
-`enable_dynamic_weather=True`:
+Both reproducers behave the same before and after the PR #5 capacity fix.
+
+To reproduce, save a map as `repro.txt` and run it with its seed:
+
+```python
+import random
+from parser import Parser
+from simulation import Simulator
+
+graph, nb_aircraft = Parser().parse("repro.txt")
+random.seed(SEED)  # 2287 for variant A, 5953 for variant B
+Simulator(graph, nb_aircraft, enable_dynamic_weather=True).run()
+# RuntimeError: Simulation exceeded 10000 turns.
+```
+
+The CLI cannot reproduce this directly, because weather is only active in the
+Pygame dispatch center and is not seeded.
+
+Variant A, seed 2287:
 
 ```txt
 nb_drones: 8
@@ -188,26 +228,37 @@ connection: h4-h3 [max_link_capacity=3 distance=700km]
 connection: S-h5 [distance=80km]
 ```
 
-```python
-import random
-from parser import Parser
-from simulation import Simulator
+Variant B, seed 5953:
 
-graph, nb_aircraft = Parser().parse("repro.txt")
-random.seed(2287)
-Simulator(graph, nb_aircraft, enable_dynamic_weather=True).run()
-# RuntimeError: Simulation exceeded 10000 turns.
+```txt
+nb_drones: 9
+start_hub: S 0 0
+end_hub: E 1 0
+hub: h0 2 0 [zone=blocked]
+hub: h1 3 0 [zone=restricted]
+hub: h2 4 0 [max_drones=3]
+hub: h3 5 0 [zone=priority max_drones=3]
+hub: h4 6 0 [zone=blocked max_drones=3]
+connection: h2-E [max_link_capacity=3 distance=1200km]
+connection: h1-S [max_link_capacity=3 distance=450km]
+connection: h1-h3 [max_link_capacity=1 distance=700km]
+connection: h0-S [max_link_capacity=3 distance=150km]
+connection: S-E [max_link_capacity=1 distance=700km]
 ```
 
-The CLI cannot reproduce this directly, because weather is only active in the
-Pygame dispatch center and is not seeded.
+**Root cause (confirmed).** `_plan_departures` allows one departure per
+distance lane per turn and assigns that slot before hub capacity is checked.
 
-**Root cause (confirmed).** D4 waits in `h4` for `h3`, and D5 waits in `h3`
-for `h4`. Both hubs have capacity 1 and share one distance lane. A swap needs
-both to leave in the same turn, but `_plan_departures` allows one departure
-per distance lane per turn, and a single departure is rejected because the
-other hub is still full. Routes are never re-planned, so the state repeats
-forever.
+- **Variant A.** D7 waits in `h4` for `h3`, and D8 waits in `h3` for `h4`.
+  Both hubs have capacity 1 and share the 700 km lane `h4-h3`. A swap needs
+  both to leave in the same turn, which the one-departure rule never allows,
+  and a single departure is rejected because the other hub is still full.
+- **Variant B.** D6 (`h3` → `h1`) and D9 (`h1` → `h3`) share the lane `h1-h3`.
+  D6 is planned first and takes the slot, then its move is rejected because
+  `h1` (capacity 1) is full. D9 could leave, since `h3` has room, but the slot
+  is already used for that turn. The same happens every turn.
+
+Routes are never re-planned, so the state repeats forever.
 
 ---
 
