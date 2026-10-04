@@ -7,13 +7,15 @@ can see why the code and tests look the way they do.
 Questions that are still open live in [open-decisions.md](open-decisions.md).
 Known defects live in [bug-triage.md](bug-triage.md).
 
-Statuses: `Accepted`, `Superseded by ADR-XXX`, `Deprecated`.
+Statuses: `Accepted`, `Accepted; partly superseded by ADR-XXX`,
+`Superseded by ADR-XXX`, `Deprecated`. A superseded ADR keeps its original
+text; the superseding ADR states what it replaces.
 
 | ID | Title | Status |
 | --- | --- | --- |
 | [ADR-001](#adr-001) | Dependencies are locked; developer commands never modify the lockfile | Accepted |
 | [ADR-002](#adr-002) | Tests protect contracts and invariants, not implementation details | Accepted |
-| [ADR-003](#adr-003) | Tests isolate and restore global random state | Accepted |
+| [ADR-003](#adr-003) | Tests isolate and restore global random state | Superseded by [ADR-012](#adr-012) |
 | [ADR-004](#adr-004) | Simulation invariants are checked against state rebuilt from events | Accepted |
 | [ADR-005](#adr-005) | Bundled maps are reference scenarios with documented turn budgets | Accepted |
 | [ADR-006](#adr-006) | Known bugs are not encoded as expected behavior in tests | Accepted |
@@ -21,10 +23,13 @@ Statuses: `Accepted`, `Superseded by ADR-XXX`, `Deprecated`.
 | [ADR-008](#adr-008) | Hub capacity counts aircraft flying towards the hub | Accepted |
 | [ADR-009](#adr-009) | Python 3.14 is the single supported version; CI runs the local quality gates | Accepted |
 | [ADR-010](#adr-010) | An aircraft in transit is committed to its leg | Accepted |
-| [ADR-011](#adr-011) | Routing decisions are made at hubs; replanning is triggered by events | Accepted |
+| [ADR-011](#adr-011) | Routing decisions are made at hubs; replanning is triggered by events | Accepted; partly superseded by [ADR-015](#adr-015) |
 | [ADR-012](#adr-012) | Weather comes from a provider as a snapshot of the current state | Accepted |
-| [ADR-013](#adr-013) | Routing uses explicit state; planner and executor share one capacity model | Accepted |
+| [ADR-013](#adr-013) | Routing uses explicit state; planner and executor share one capacity model | Accepted; partly superseded by [ADR-015](#adr-015) |
 | [ADR-014](#adr-014) | Waiting happens in place; deadlocks are detected, not waited out | Accepted |
+| [ADR-015](#adr-015) | Every hub is a safe waiting location; hub capacity has one layer | Accepted |
+| [ADR-016](#adr-016) | Transport mode is map data; weather acts through one set of transport rules | Accepted |
+| [ADR-017](#adr-017) | Road is a fallback with a consecutive-road budget | Accepted |
 
 ---
 
@@ -99,7 +104,9 @@ but not optimized as a target, and no coverage threshold is enforced yet.
 
 ### Tests isolate and restore global random state
 
-- **Status:** Accepted
+- **Status:** Superseded by [ADR-012](#adr-012). Since PR #8, weather comes
+  from providers that own their random generator, and no production code
+  uses the global `random` module.
 - **Date:** 2026-10-03
 
 **Context.** The weather system draws from the global `random` module, even
@@ -375,7 +382,8 @@ on knowing where every aircraft in transit will arrive.
 
 ### Routing decisions are made at hubs; replanning is triggered by events
 
-- **Status:** Accepted
+- **Status:** Accepted; partly superseded by [ADR-015](#adr-015) (hub
+  safety, waiting, and weather diversion)
 - **Date:** 2026-10-04
 
 **Context.** Every route is planned once, before the first turn, and never
@@ -490,7 +498,8 @@ global state.
 
 ### Routing uses explicit state; planner and executor share one capacity model
 
-- **Status:** Accepted
+- **Status:** Accepted; partly superseded by [ADR-015](#adr-015) (two
+  layers of hub capacity)
 - **Date:** 2026-10-04
 
 **Context.** The planner and the executor apply different capacity rules:
@@ -609,3 +618,193 @@ hang into either a resolved situation or an explicit, diagnosable failure.
 - Whether the one-departure-per-turn rule applies per lane or per direction
   is open ([DECISION-008](open-decisions.md#decision-008)). In both variant A
   reproducers it blocks the swap even when lane capacity would allow it.
+
+---
+
+## ADR-015
+
+### Every hub is a safe waiting location; hub capacity has one layer
+
+- **Status:** Accepted
+- **Date:** 2026-10-04
+
+**Context.** [ADR-011](#adr-011) allowed waiting only in a safe hub and
+introduced weather diversion to a nearby safe hub. [ADR-013](#adr-013) added
+weather emergency overflow so that a diverting aircraft could enter a full
+hub. Both assumed that a hub can become unsafe. In the project's world model
+weather acts on connections and transport modes, never on hubs.
+
+**Decision.**
+
+- **Hubs are always safe.** Every hub is always a safe waiting location.
+  Weather affects connections and transport modes, not hub safety, so an
+  aircraft never has to leave a hub because the hub became unsafe.
+- **Waiting is always possible.** Waiting at the current hub is always
+  physically safe. Routing policy may still prefer to continue or reroute.
+- **Unavailable route.** A route is unavailable when it contains a connection
+  that is unavailable under the current weather
+  ([ADR-016](#adr-016)), or when it breaks a routing-policy limit such as
+  the consecutive-road budget ([ADR-017](#adr-017)).
+- **Reroute, not diversion.** If a route to the destination exists, taking it
+  is a reroute, even when it passes through other hubs or returns to a hub
+  visited before. There is no emergency diversion away from an unsafe hub,
+  because there are no unsafe hubs.
+- **No route means waiting.** If no route to the destination is currently
+  available, the aircraft waits in its current hub. Moving to an intermediate
+  hub without an available route to the destination (a positioning move) is
+  deferred ([DECISION-010](open-decisions.md#decision-010)).
+- **One capacity layer.** Hub capacity is the normal capacity (`max_drones`)
+  only. There is no emergency overflow.
+
+**Supersedes.**
+
+- In [ADR-011](#adr-011):
+  - the condition that waiting is valid only in a safe hub;
+  - the "divert to a nearby safe hub because of weather" option, as an
+    escape from an unsafe hub;
+  - the consequences that waiting is valid only in a safe hub and that
+    diversion needs a safe-hub definition and emergency capacity.
+
+  Decision points, replanning triggers, continue, wait, reroute, and
+  backtracking remain as accepted.
+- In [ADR-013](#adr-013):
+  - the "Two layers of hub capacity" decision;
+  - the consequence that the invariant checker must tell overflow arrivals
+    from capacity violations.
+
+  Explicit routing inputs, one capacity model, reservations v2, and the
+  executor as a safety layer remain as accepted.
+
+**Rationale.** Overflow existed only for an aircraft that had to enter a full
+hub. With every hub safe, no such aircraft exists:
+
+- an aircraft in a hub can wait;
+- an aircraft in transit already holds its destination slot
+  ([ADR-008](#adr-008));
+- start and end hubs have unlimited capacity.
+
+A second capacity layer would add exceptions to the hub-capacity invariant
+and special events without a use case.
+
+**Consequences.**
+
+- The hub-capacity invariant stays simple: no hub ever holds more aircraft
+  than its normal capacity.
+- [DECISION-004](open-decisions.md#decision-004) and
+  [DECISION-005](open-decisions.md#decision-005) are decided.
+- If a future weather source can close hubs themselves (for example, real
+  airport closures), that is a new decision with new evidence.
+
+---
+
+## ADR-016
+
+### Transport mode is map data; weather acts through one set of transport rules
+
+- **Status:** Accepted
+- **Date:** 2026-10-04
+
+**Context.**
+
+- Until PR #8 a lane's transport mode was inferred from its distance: under
+  200 km meant road, longer meant air. The rule was repeated in the
+  pathfinder, the parser's capacity defaults, and the dispatch center. A road
+  leg could not be longer than 199 km, and an air leg could not be shorter
+  than 200 km.
+- Weather lived on `Connection` objects: storm and snow closed every lane,
+  roads included.
+
+The routing engine must not infer geography from coordinates, names, or
+distances. The map has to say which transport exists.
+
+**Decision.**
+
+- **Mode is map data.** Each connection has a transport mode, `air` or
+  `road`, set by `mode=air|road` in the map. The default is `air`. A lane
+  without `distance` (the assignment's abstract maps) is an air lane, and
+  its travel time still comes from the hub it enters.
+- **Road needs a distance.** An explicit `mode=road` requires a positive
+  numeric `distance`. An unknown mode or a non-numeric distance is a parse
+  error.
+- **Weather cannot create transport.** Weather never creates a connection or
+  a transport mode, and never changes a connection's distance. A weather
+  state that names a connection the map does not define is rejected.
+- **One transport-rules boundary.** `transport.py` turns the current weather,
+  a connection's mode, and its static data into availability and travel
+  time. Simulator and pathfinder do not branch on weather conditions
+  themselves.
+- **Availability.** Air legs are unavailable in storm and snow. Road legs are
+  available in any weather. Bad weather only makes them slower.
+- **Travel time.** Road legs travel at 100 km/h and air legs at 400 km/h.
+  Tailwind affects only air legs. Rain, snow, and storm slow road legs.
+- **Provisional penalties.** The current numbers (rain +1 turn on roads,
+  storm or snow +2, tailwind halves air distance) are transitional. Their
+  final semantics belong to [DECISION-001](open-decisions.md#decision-001).
+- **One lane per pair.** Two connections between the same pair of hubs, such
+  as an air lane and a road lane, are not supported
+  ([DECISION-009](open-decisions.md#decision-009)).
+
+**Rationale.** A map that lists its transport options is explicit and
+testable. Islands, seas, and borders need no special code: a map without a
+road between two hubs has no road there. Keeping all weather-and-mode rules in
+one module lets the cost model change later without touching routing or
+execution.
+
+**Consequences.**
+
+- Bundled maps keep their behavior. The ten Germany lanes under 200 km are
+  marked `mode=road`, and every other bundled lane was already an air or
+  abstract lane.
+- A map written for the old rule that relies on short lanes being roads must
+  add `mode=road`. Otherwise those lanes become air lanes (400 km/h, default
+  capacity 1, closed in storm and snow).
+- Weather runs on maps with road lanes change: aircraft drive through storm
+  and snow instead of waiting for them to clear.
+
+---
+
+## ADR-017
+
+### Road is a fallback with a consecutive-road budget
+
+- **Status:** Accepted
+- **Date:** 2026-10-04
+
+**Context.** Maria's Airlanes is primarily an air-routing system. With roads
+open in any weather ([ADR-016](#adr-016)), routing could turn a flight into
+an arbitrarily long drive. Germany already has a chain of six road lanes,
+745 km long.
+
+**Decision.**
+
+- **Budget.** Routing limits the total consecutive road distance of a route
+  with the routing-policy value `max_consecutive_road_km`. The default is
+  700 km. It is one explicit, configurable value, not a constant repeated in
+  routing code.
+- **What counts.** The limit applies to the sum of consecutive road legs, not
+  to each leg. An air leg resets it. Examples:
+  - 250 km road + 300 km road = 550 km: allowed;
+  - 400 km road + 400 km road = 800 km: not allowed;
+  - 500 km road → air → 600 km road: allowed.
+- **Policy, not physics.** A road beyond the limit may physically exist.
+  Routing only declines to use it as part of an Airlanes journey.
+- **No special cases.** Road fallback arises from routing over the currently
+  usable topology. There is no rule of the form "in a storm, take the car".
+  In good weather air normally wins because it is faster. When weather closes
+  an air lane, an existing road route within the budget may become the best
+  usable alternative. Otherwise the aircraft waits or uses another air route.
+- **When it applies.** The budget is enforced by dynamic routing in PR #9,
+  together with the routing-policy configuration and the road distance each
+  aircraft has driven since its last air leg. PR #8 adds no unused setting.
+
+**Rationale.** The limit keeps road travel a fallback while still letting it
+bridge gaps that weather opens in the air network. Counting the consecutive
+segment, rather than single legs, prevents chains of short roads from adding
+up to a long drive.
+
+**Consequences.**
+
+- Route search must track the road distance driven since the last air leg as
+  part of its state, and an aircraft carries it across replanning.
+- Until PR #9, routes are not checked against the budget. On the bundled
+  maps, planned routes use at most 245 km of consecutive road.

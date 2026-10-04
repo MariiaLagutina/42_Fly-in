@@ -24,6 +24,7 @@ from pygame_common import (
     IMG_DIR,
     Point,
 )
+from transport import TransportMode
 from zone import Zone
 
 
@@ -336,7 +337,7 @@ class AirlinesWindow:
         zone_b = self.graph.get_zone(second_zone)
         if zone_a and zone_b:
             conn = self.graph.get_connection(zone_a, zone_b)
-            if conn and 0 < conn.distance < 200:
+            if conn and conn.mode is TransportMode.ROAD:
                 return True
         return False
 
@@ -494,7 +495,7 @@ class AirlinesWindow:
                     conn.name(), "clear"
                 )
 
-                if conn.distance < 200:
+                if conn.mode is TransportMode.ROAD:
                     if current_weather in ("storm", "snow"):
                         return "ROAD DELAY", UIColors.RED
                     return "DRIVING", UIColors.BLUE

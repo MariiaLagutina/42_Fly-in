@@ -168,7 +168,7 @@ terminates.
 | Severity | Medium |
 | Affected area | `simulation.py`: `Simulator._plan_departures`, `Simulator._select_feasible_moves`; `pathfinder.py`: `Pathfinder.find_cooperative_path` |
 | Discovered during | Pathfinding and simulation test audit (PR #4), 2026-10-03; second variant during the BUG-001/002 fix audit (PR #5); deadlocks without weather during the dynamic-routing design (PR #7) |
-| Planned resolution | PR #9 (cooperative scheduling / reservations v2), following [ADR-013](decisions.md#adr-013) and [ADR-014](decisions.md#adr-014). Variant A also depends on [DECISION-008](open-decisions.md#decision-008). |
+| Planned resolution | PR #10 (cooperative scheduling / reservations v2; numbered PR #9 before the plan was split, see [dynamic-routing.md](dynamic-routing.md#delivery-plan)), following [ADR-013](decisions.md#adr-013) and [ADR-014](decisions.md#adr-014). Variant A also depends on [DECISION-008](open-decisions.md#decision-008). |
 | Regression test | Not yet |
 | Related PR | PR #7 (design and evidence) |
 
@@ -195,6 +195,10 @@ confirmed:
   Method and generator are described in
   [dynamic-routing.md](dynamic-routing.md#evidence).
 - All reproducers behave the same before and after the PR #5 capacity fix.
+- Since PR #8 the transport mode is map data
+  ([ADR-016](decisions.md#adr-016)). Lanes that were road under the old
+  "under 200 km" rule are marked `mode=road` in the reproducers below, so
+  they keep their original meaning. All four were re-verified after PR #8.
 
 **Reproducers without weather.** These are deterministic. Save one as
 `repro.txt` and run `uv run --locked python3 main.py repro.txt`. The run ends
@@ -214,9 +218,9 @@ hub: h1 3 0 [zone=blocked]
 hub: h2 4 0
 hub: h3 5 0 [zone=restricted max_drones=2]
 hub: h4 6 0
-connection: h2-h0 [distance=80km]
+connection: h2-h0 [distance=80km mode=road]
 connection: h1-E [max_link_capacity=3 distance=700km]
-connection: h4-h2 [distance=150km]
+connection: h4-h2 [distance=150km mode=road]
 connection: h4-h3 [max_link_capacity=3 distance=700km]
 connection: h3-S [distance=700km]
 connection: S-E [distance=450km]
@@ -236,7 +240,7 @@ hub: h0 2 0 [zone=priority max_drones=1]
 hub: h1 3 0 [zone=restricted max_drones=2]
 hub: h2 4 0
 connection: h1-E [distance=450km]
-connection: h2-h0 [max_link_capacity=1 distance=150km]
+connection: h2-h0 [max_link_capacity=1 distance=150km mode=road]
 connection: S-h2 [distance=1200km]
 connection: E-S [distance=700km]
 connection: S-h0 [max_link_capacity=3 distance=450km]
@@ -246,16 +250,18 @@ connection: S-h0 [max_link_capacity=3 distance=450km]
 it with its seed:
 
 ```python
-import random
 from parser import Parser
 from simulation import Simulator
+from weather import RandomWeather
 
 graph, nb_aircraft = Parser().parse("repro.txt")
-random.seed(SEED)  # 2287 for variant A, 5953 for variant B
-Simulator(graph, nb_aircraft, enable_dynamic_weather=True).run()
+weather = RandomWeather(graph, seed=SEED)  # 2287 for A, 5953 for B
+Simulator(graph, nb_aircraft, weather=weather).run()
 # RuntimeError: Simulation exceeded 10000 turns.
 ```
 
+`RandomWeather` draws in the same order as the earlier global-`random`
+weather, so these seeds produce the same weather as when the bug was found.
 The CLI cannot reproduce this directly, because weather is only active in the
 Pygame dispatch center and is not seeded.
 
@@ -273,12 +279,12 @@ hub: h4 6 0 [zone=priority]
 hub: h5 7 0 [zone=blocked max_drones=2]
 connection: h2-h5 [max_link_capacity=2 distance=450km]
 connection: E-S [distance=1200km]
-connection: h5-E [max_link_capacity=2 distance=80km]
+connection: h5-E [max_link_capacity=2 distance=80km mode=road]
 connection: h1-E [max_link_capacity=2 distance=1200km]
-connection: h3-h2 [max_link_capacity=2 distance=80km]
-connection: h3-S [distance=80km]
+connection: h3-h2 [max_link_capacity=2 distance=80km mode=road]
+connection: h3-S [distance=80km mode=road]
 connection: h4-h3 [max_link_capacity=3 distance=700km]
-connection: S-h5 [distance=80km]
+connection: S-h5 [distance=80km mode=road]
 ```
 
 Variant B, seed 5953:
@@ -295,7 +301,7 @@ hub: h4 6 0 [zone=blocked max_drones=3]
 connection: h2-E [max_link_capacity=3 distance=1200km]
 connection: h1-S [max_link_capacity=3 distance=450km]
 connection: h1-h3 [max_link_capacity=1 distance=700km]
-connection: h0-S [max_link_capacity=3 distance=150km]
+connection: h0-S [max_link_capacity=3 distance=150km mode=road]
 connection: S-E [max_link_capacity=1 distance=700km]
 ```
 
@@ -328,7 +334,7 @@ connection: S-E [max_link_capacity=1 distance=700km]
 4. **Nothing resolves it.** Routes are never re-planned, and deadlocks are not
    detected, so the state repeats until the 10,000-turn limit.
 
-**Planned fix.** In PR #9:
+**Planned fix.** In PR #10:
 
 - give a departure slot only to moves that pass the hub check (variant B);
 - make planner and executor share one capacity model;
@@ -407,10 +413,10 @@ simulation. It is recorded so it can be removed or used deliberately later.
   `Simulator.print_stats` are not called.
 - `SimulationConfig.UNREACHABLE_COST`, `RESERVATION_PENALTY_WEIGHT`, and
   `PRIORITY_ZONE_BASE_COST` are used only by the unused methods above.
-- The storm/snow road penalty in `Pathfinder._calculate_move_cost`
-  (`WEATHER_PENALTY_SEVERE`) is unreachable: storm and snow always close the
-  lane, and no aircraft departs on a closed lane. Routes are planned before
-  any weather exists.
+- Resolved in PR #8: the storm/snow road penalty (`WEATHER_PENALTY_SEVERE`)
+  used to be unreachable, because storm and snow closed every lane. Roads now
+  stay open in storm and snow ([ADR-016](decisions.md#adr-016)), so the
+  penalty applies.
 
 These methods are intentionally not covered by tests.
 

@@ -4,6 +4,7 @@ from events import EventDispatcher
 from parser import Parser, ParseError
 from simulation import Simulator
 from visualizers import AirlinesVisualizer, CapacityInfoVisualizer, Visualizer
+from weather import RandomWeather
 
 
 def main() -> None:
@@ -59,7 +60,7 @@ def main() -> None:
         graph,
         nb_drones,
         dispatcher,
-        enable_dynamic_weather=args.pygame_airlines,
+        weather=RandomWeather(graph) if args.pygame_airlines else None,
     )
     try:
         turns = simulator.run()

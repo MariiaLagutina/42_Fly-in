@@ -1,8 +1,9 @@
-"""Connection: endpoints, naming, defaults, and weather state."""
+"""Connection: endpoints, naming, defaults, and transport mode."""
 
 import pytest
 
 from connection import Connection
+from transport import TransportMode
 from zone import Zone
 
 
@@ -17,8 +18,7 @@ def test_defaults(zones: tuple[Zone, Zone, Zone]) -> None:
 
     assert connection.max_link_capacity == 1
     assert connection.distance == 0
-    assert connection.is_open is True
-    assert connection.weather_condition == "clear"
+    assert connection.mode is TransportMode.AIR
 
 
 def test_explicit_capacity(zones: tuple[Zone, Zone, Zone]) -> None:
@@ -66,17 +66,9 @@ def test_name_follows_declaration_order(
     assert Connection(bravo, alpha).name() == "bravo-alpha"
 
 
-@pytest.mark.parametrize(
-    ("condition", "is_open"),
-    [("storm", False), ("rain", True), ("clear", True)],
-)
-def test_set_weather_updates_condition_and_state(
-    zones: tuple[Zone, Zone, Zone], condition: str, is_open: bool
-) -> None:
+def test_explicit_mode(zones: tuple[Zone, Zone, Zone]) -> None:
     alpha, bravo, _ = zones
-    connection = Connection(alpha, bravo)
 
-    connection.set_weather(condition, is_open=is_open)
+    connection = Connection(alpha, bravo, mode=TransportMode.ROAD)
 
-    assert connection.weather_condition == condition
-    assert connection.is_open is is_open
+    assert connection.mode is TransportMode.ROAD

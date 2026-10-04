@@ -9,14 +9,25 @@ distance travel-time formula leave no room for another valid answer.
 
 import pytest
 
+from events import AgentInTransit, WeatherChanged
 from graph import Graph
 from tests.support.graphs import Link, build_graph, end_hub, hub, start_hub
 from tests.support.simulation import (
     check_invariants,
     peak_hub_occupancy,
+    SimulationRun,
     run_simulation,
 )
+from transport import TransportMode
+from weather import ScriptedWeather, WeatherCondition
 from zone import ZoneType
+
+AIR = TransportMode.AIR
+ROAD = TransportMode.ROAD
+
+
+def departure_turns(run: SimulationRun) -> list[int]:
+    return [e.turn_number for e in run.events if isinstance(e, AgentInTransit)]
 
 
 def test_single_aircraft_on_a_linear_route() -> None:
@@ -162,40 +173,106 @@ def test_missing_route_fails_before_the_first_turn(graph: Graph) -> None:
         run_simulation(graph, 2)
 
 
-# --- Distance-based travel time ---------------------------------------------
-# Road legs (< 200 km) travel at 100 km/h, air legs at 400 km/h, rounded up
-# to whole turns. Rain adds one turn to road legs; a tailwind halves the
-# distance of air legs. Weather is set by hand and the random weather system
-# stays off, so these runs are deterministic.
+# --- Distance-based travel time and weather ---------------------------------
+# Road legs travel at 100 km/h, air legs at 400 km/h, rounded up to whole
+# turns; the mode comes from the map. Weather comes from `ScriptedWeather`,
+# so these runs are deterministic. Weather penalties are provisional
+# (DECISION-001) and are asserted only as "slower".
 
 
 @pytest.mark.parametrize(
-    ("distance", "weather", "expected_turns"),
+    ("mode", "distance", "expected_turns"),
     [
-        pytest.param(100, "clear", 1, id="road-100km"),
-        pytest.param(150, "clear", 2, id="road-150km"),
-        pytest.param(199, "clear", 2, id="road-199km"),
-        pytest.param(200, "clear", 1, id="air-200km"),
-        pytest.param(450, "clear", 2, id="air-450km"),
-        pytest.param(900, "clear", 3, id="air-900km"),
-        pytest.param(150, "rain", 3, id="road-150km-rain"),
-        pytest.param(900, "tailwind", 2, id="air-900km-tailwind"),
+        pytest.param(ROAD, 100, 1, id="road-100km"),
+        pytest.param(ROAD, 150, 2, id="road-150km"),
+        pytest.param(ROAD, 250, 3, id="road-250km"),
+        pytest.param(AIR, 150, 1, id="air-150km"),
+        pytest.param(AIR, 450, 2, id="air-450km"),
+        pytest.param(AIR, 900, 3, id="air-900km"),
     ],
 )
-def test_distance_and_weather_set_travel_time(
-    distance: int, weather: str, expected_turns: int
+def test_mode_and_distance_set_travel_time(
+    mode: TransportMode, distance: int, expected_turns: int
 ) -> None:
     graph = build_graph(
         [start_hub(), end_hub()],
-        [Link("start", "goal", distance=distance)],
+        [Link("start", "goal", distance=distance, mode=mode)],
     )
-    (lane,) = graph.connections
-    lane.set_weather(weather, is_open=True)
 
     run = run_simulation(graph, 1)
 
     assert check_invariants(run) == []
     assert run.turn_count == expected_turns
+
+
+def test_aircraft_waits_while_its_air_lane_is_closed() -> None:
+    graph = build_graph(
+        [start_hub(), end_hub()], [Link("start", "goal", distance=450)]
+    )
+    weather = ScriptedWeather({
+        1: {"start-goal": WeatherCondition.STORM},
+        4: {"start-goal": WeatherCondition.CLEAR},
+    })
+
+    run = run_simulation(graph, 1, weather)
+
+    assert check_invariants(run) == []
+    assert departure_turns(run) == [4]
+    assert run.turn_count == 5
+
+
+def test_road_stays_open_but_slower_in_a_storm() -> None:
+    graph = build_graph(
+        [start_hub(), end_hub()],
+        [Link("start", "goal", distance=150, mode=ROAD)],
+    )
+    weather = ScriptedWeather({1: {"start-goal": WeatherCondition.STORM}})
+
+    run = run_simulation(graph, 1, weather)
+
+    assert check_invariants(run) == []
+    assert departure_turns(run) == [1]
+    assert run.turn_count > 2
+
+
+def test_weather_events_report_each_change_once() -> None:
+    graph = build_graph(
+        [start_hub(), hub("a"), end_hub()],
+        [
+            Link("start", "a", distance=450),
+            Link("a", "goal", distance=150, mode=ROAD),
+        ],
+    )
+    weather = ScriptedWeather({
+        1: {
+            "start-a": WeatherCondition.STORM,
+            "a-goal": WeatherCondition.STORM,
+        },
+        2: {"start-a": WeatherCondition.STORM},
+        3: {"start-a": WeatherCondition.CLEAR},
+    })
+
+    run = run_simulation(graph, 1, weather)
+
+    assert [
+        (e.turn_number, e.connection_name, e.condition, e.is_open)
+        for e in run.events
+        if isinstance(e, WeatherChanged)
+    ] == [
+        (1, "start-a", "storm", False),
+        (1, "a-goal", "storm", True),
+        (3, "start-a", "clear", True),
+    ]
+
+
+def test_weather_cannot_describe_a_connection_the_map_lacks() -> None:
+    graph = build_graph(
+        [start_hub(), end_hub()], [Link("start", "goal", distance=450)]
+    )
+    weather = ScriptedWeather({1: {"start-nowhere": WeatherCondition.STORM}})
+
+    with pytest.raises(ValueError):
+        run_simulation(graph, 1, weather)
 
 
 # --- Regression: hub capacity (BUG-001, BUG-002) ----------------------------

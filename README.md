@@ -23,12 +23,11 @@ air legs, live weather, and a Pygame dispatch center.
   once; air lanes limit how many aircraft can use them at the same time.
 - **Hub types.** `normal`, `priority` (preferred by the planner),
   `restricted` (takes two turns to enter), and `blocked` (never used).
-- **Road and air legs.** On distance-based maps, legs shorter than 200 km are
-  travelled by road, longer legs by air, each with its own speed and default
-  lane capacity.
+- **Road and air legs.** Each lane is an air or road lane, as declared in the
+  map, with its own speed and default lane capacity.
 - **Dynamic weather.** In the dispatch center mode, storms, snow, rain, and
-  tailwinds appear and clear during the simulation and change which lanes are
-  open and how long a leg takes.
+  tailwinds appear and clear during the simulation. Storm and snow ground
+  aircraft; roads stay open but get slower.
 - **Real maps.** Germany (16 hubs) and Europe (24 hubs) with real city names,
   populations, and distances.
 - **Aviation dispatch center.** A Pygame interface with a geographic map,
@@ -112,13 +111,19 @@ only moves that pass the capacity checks are applied.
 
 ## Road and air legs
 
-When a lane has a `distance`, travel time is derived from it:
+A lane's transport mode comes from the map: `mode=air` (the default) or
+`mode=road`. The engine never infers it from distance, coordinates, or city
+names. A road lane needs a `distance`. When a lane has a `distance`, travel
+time is derived from it and the mode:
 
-| Distance | Mode | Speed | Default lane capacity |
-| --- | --- | --- | --- |
-| under 200 km | road | 100 km/h | 3 |
-| 200–500 km | air | 400 km/h | 1 |
-| over 500 km | air | 400 km/h | 2 |
+| Mode | Speed | Default lane capacity |
+| --- | --- | --- |
+| road | 100 km/h | 3 |
+| air, up to 500 km | 400 km/h | 1 |
+| air, over 500 km | 400 km/h | 2 |
+
+Lanes without a `distance` keep the original assignment's rule: entering a
+hub takes one turn, or two for a restricted hub.
 
 The default capacity applies only when the lane does not set
 `max_link_capacity` itself. Similarly, a hub with a `population` but no
@@ -129,11 +134,15 @@ explicit capacity gets one slot per 100,000 inhabitants.
 Weather is active in `--pygame-airlines` mode. Each turn, every clear lane has
 a 5% chance to change, and every affected lane has a 20% chance to clear again.
 
-| Condition | Effect |
-| --- | --- |
-| `storm`, `snow` | Lane closes; aircraft waiting for it hold until it reopens |
-| `rain` | Road legs take one extra turn |
-| `tailwind` | Air legs count as half their distance |
+| Condition | Air lanes | Road lanes |
+| --- | --- | --- |
+| `storm`, `snow` | Closed; aircraft hold until the lane reopens | Open, two extra turns |
+| `rain` | No effect | One extra turn |
+| `tailwind` | Count as half their distance | No effect |
+
+Weather never creates a lane or changes its distance. The extra turns are
+provisional and may change when the travel-time model is settled. Every hub
+is always a safe place to wait.
 
 Routes are planned before the first turn and are not re-planned when the
 weather changes. Weather affects whether a leg can start and how long it
@@ -193,9 +202,11 @@ Lane metadata:
 
 - `max_link_capacity=<positive integer>`
 - `distance=<positive integer>km`
+- `mode=air|road` (default `air`; `road` requires a `distance`)
 
 The parser reports malformed lines, duplicate hubs and lanes, invalid
-capacities, unknown hub types, and missing start or end hubs as a `ParseError`
+capacities and distances, unknown hub types and transport modes, road lanes
+without a distance, and missing start or end hubs as a `ParseError`
 with the line number. If no route connects the start and end hubs, the
 simulator stops with an explicit error.
 
@@ -214,7 +225,7 @@ map file → Parser → Graph (hubs, lanes)
                       ↓
                   Pathfinder ← reservation tables
                       ↓
-                  Simulator ← WeatherSystem
+                  Simulator ← WeatherProvider → WeatherState
                       ↓
                 EventDispatcher
           ↙        ↓         ↓          ↘
@@ -228,11 +239,12 @@ map file → Parser → Graph (hubs, lanes)
 | `drone.py` | State of a single aircraft (waiting, in transit, delivered) |
 | `pathfinder.py` | Cooperative space-time search and move costs |
 | `simulation.py` | Turn execution and capacity checks |
-| `weather.py` | Random weather changes on lanes |
+| `weather.py` | Weather providers (none, seeded random, scripted) and the weather state |
+| `transport.py` | Transport modes and how weather affects their availability and travel time |
 | `events.py` | Typed events and the dispatcher |
 | `visualizers.py` | Text, flight log, and capacity output |
 | `pygame_standard.py`, `pygame_airlines.py`, `pygame_common.py` | Pygame viewers and their shared helpers |
-| `config.py` | Speeds, thresholds, and cost weights |
+| `config.py` | Speeds, weather penalties, and cost weights |
 
 The simulator does not know which visualizer is attached, so it can run
 headless while the graphical viewers replay the same events.

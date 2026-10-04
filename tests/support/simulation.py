@@ -24,6 +24,7 @@ from events import (
 )
 from graph import Graph
 from simulation import Simulator
+from weather import WeatherProvider
 from zone import ZoneType
 
 
@@ -61,14 +62,12 @@ class SimulationRun:
 
 
 def run_simulation(
-    graph: Graph, nb_aircraft: int, weather: bool = False
+    graph: Graph, nb_aircraft: int, weather: WeatherProvider | None = None
 ) -> SimulationRun:
     dispatcher = EventDispatcher()
     recorder = EventRecorder()
     dispatcher.add_listener(recorder)
-    simulator = Simulator(
-        graph, nb_aircraft, dispatcher, enable_dynamic_weather=weather
-    )
+    simulator = Simulator(graph, nb_aircraft, dispatcher, weather=weather)
     turns = simulator.run()
     return SimulationRun(
         graph,

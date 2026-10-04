@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from connection import Connection
 from graph import Graph
+from transport import TransportMode
 from zone import Zone, ZoneType
 
 
@@ -13,6 +14,7 @@ class Link:
     zone_b: str
     capacity: int = 1
     distance: int = 0
+    mode: TransportMode = TransportMode.AIR
 
 
 def hub(
@@ -39,7 +41,7 @@ def build_graph(zones: list[Zone], links: list[Link]) -> Graph:
         zone_a = graph.get_zone(link.zone_a)
         zone_b = graph.get_zone(link.zone_b)
         assert zone_a is not None and zone_b is not None
-        connection = Connection(zone_a, zone_b, link.capacity)
+        connection = Connection(zone_a, zone_b, link.capacity, link.mode)
         connection.distance = link.distance
         graph.add_connection(connection)
     return graph

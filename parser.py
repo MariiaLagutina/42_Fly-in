@@ -2,6 +2,7 @@ import re
 from zone import Zone, ZoneType
 from connection import Connection
 from graph import Graph
+from transport import TransportMode, default_link_capacity
 
 
 class ParseError(Exception):
@@ -176,20 +177,32 @@ class Parser:
             )
         capacity = int(capacity_str)
 
+        mode_str = metadata.get("mode", TransportMode.AIR.value)
+        try:
+            mode = TransportMode(mode_str)
+        except ValueError as exc:
+            raise ParseError(
+                line_num, f"Invalid transport mode: {mode_str}."
+            ) from exc
+
         distance = 0
         if "distance" in metadata:
             dist_str = metadata["distance"].replace("km", "").strip()
-            if dist_str.isdigit():
-                distance = int(dist_str)
-                if not explicit_max_link_capacity:
-                    if distance > 500:
-                        capacity = 2
-                    elif 0 < distance < 200:
-                        capacity = 3
-                    else:
-                        capacity = 1
+            if not dist_str.isdigit():
+                raise ParseError(
+                    line_num, "distance must be a whole number of km."
+                )
+            distance = int(dist_str)
 
-        connection = Connection(zone_a, zone_b, capacity)
+        if mode is TransportMode.ROAD and distance <= 0:
+            raise ParseError(
+                line_num, "A road connection needs a positive distance."
+            )
+
+        if not explicit_max_link_capacity:
+            capacity = default_link_capacity(mode, distance)
+
+        connection = Connection(zone_a, zone_b, capacity, mode)
         connection.distance = distance
         connection.explicit_max_link_capacity = explicit_max_link_capacity
 

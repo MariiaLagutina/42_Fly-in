@@ -11,6 +11,7 @@ import pytest
 
 from graph import Graph
 from parser import ParseError, Parser
+from transport import TransportMode
 from zone import ZoneType
 
 MAPS_DIR = Path(__file__).resolve().parents[2] / "maps"
@@ -219,27 +220,72 @@ def test_explicit_link_capacity(write_map: MapWriter) -> None:
 
 
 @pytest.mark.parametrize(
-    ("distance", "expected_capacity"),
+    ("metadata", "expected_capacity"),
     [
-        (1, 3),
-        (199, 3),
-        (200, 1),
-        (500, 1),
-        (501, 2),
-        (2000, 2),
+        ("distance=1km", 1),
+        ("distance=500km", 1),
+        ("distance=501km", 2),
+        ("distance=2000km", 2),
+        ("distance=1km mode=road", 3),
+        ("distance=2000km mode=road", 3),
     ],
 )
-def test_distance_sets_default_link_capacity(
-    write_map: MapWriter, distance: int, expected_capacity: int
+def test_mode_and_distance_set_default_link_capacity(
+    write_map: MapWriter, metadata: str, expected_capacity: int
 ) -> None:
-    """Road legs under 200 km: 3, air legs 200-500 km: 1, over 500 km: 2."""
+    """Road lanes: 3. Air lanes up to 500 km: 1, longer: 2."""
     graph, _ = parse(write_map(
-        HEADER + f"connection: start-goal [distance={distance}km]\n"
+        HEADER + f"connection: start-goal [{metadata}]\n"
     ))
 
     (connection,) = graph.connections
-    assert connection.distance == distance
     assert connection.max_link_capacity == expected_capacity
+
+
+def test_lanes_are_air_unless_the_map_says_road(write_map: MapWriter) -> None:
+    """The mode is map data: a short lane is still air, a long one can be
+    road, and an abstract lane without distance is air."""
+    graph, _ = parse(write_map(
+        HEADER
+        + "hub: a 1 0\n"
+        + "connection: start-a [distance=150km]\n"
+        + "connection: a-goal [distance=800km mode=road]\n"
+        + "connection: start-goal\n"
+    ))
+
+    modes = {conn.name(): conn.mode for conn in graph.connections}
+    assert modes == {
+        "start-a": TransportMode.AIR,
+        "a-goal": TransportMode.ROAD,
+        "start-goal": TransportMode.AIR,
+    }
+
+
+def test_explicit_air_mode(write_map: MapWriter) -> None:
+    graph, _ = parse(write_map(
+        HEADER + "connection: start-goal [distance=150km mode=air]\n"
+    ))
+
+    (connection,) = graph.connections
+    assert connection.mode is TransportMode.AIR
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        pytest.param("mode=boat distance=100km", id="unknown-mode"),
+        pytest.param("mode=road", id="road-without-distance"),
+        pytest.param("mode=road distance=0km", id="road-with-zero-distance"),
+        pytest.param("distance=far", id="non-numeric-distance"),
+    ],
+)
+def test_invalid_transport_data_is_rejected(
+    write_map: MapWriter, metadata: str
+) -> None:
+    with pytest.raises(ParseError) as error:
+        parse(write_map(HEADER + f"connection: start-goal [{metadata}]\n"))
+
+    assert error.value.line_number == 4
 
 
 def test_explicit_link_capacity_overrides_distance(
@@ -269,6 +315,19 @@ def test_included_maps_parse(map_file: Path) -> None:
 def test_included_maps_are_found() -> None:
     """Guard against the map test above silently collecting nothing."""
     assert MAP_FILES
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "road_lanes"),
+    [("bonus/germany_map.txt", 10), ("bonus/europa_map.txt", 0)],
+)
+def test_bundled_maps_mark_their_road_lanes(
+    relative_path: str, road_lanes: int
+) -> None:
+    graph, _ = parse(MAPS_DIR / relative_path)
+
+    roads = [c for c in graph.connections if c.mode is TransportMode.ROAD]
+    assert len(roads) == road_lanes
 
 
 # --- Errors tied to a specific line -----------------------------------------
