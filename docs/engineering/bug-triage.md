@@ -46,7 +46,7 @@ the violation precisely.
 | --- | --- | --- | --- | --- |
 | [BUG-001](#bug-001) | Hub capacity exceeded by simultaneous multi-turn arrivals | `VERIFIED` | High | Simulation execution |
 | [BUG-002](#bug-002) | Hub capacity exceeded after a rejected departure | `VERIFIED` | High | Simulation execution |
-| [BUG-003](#bug-003) | Deadlock between opposite-direction aircraft on a distance lane | `CONFIRMED` | Medium | Simulation execution |
+| [BUG-003](#bug-003) | Deadlock between opposite-direction aircraft on a distance lane | `PLANNED` | Medium | Simulation execution and planning |
 | [BUG-004](#bug-004) | Turns without printed movement are dropped from the output | `CONFIRMED` | Low | Simulation output |
 
 ---
@@ -164,13 +164,13 @@ terminates.
 
 | Field | Value |
 | --- | --- |
-| Status | `CONFIRMED` |
+| Status | `PLANNED` |
 | Severity | Medium |
-| Affected area | `simulation.py`: `Simulator._plan_departures`, `Simulator._select_feasible_moves` |
-| Discovered during | Pathfinding and simulation test audit (PR #4), 2026-10-03; second variant during the BUG-001/002 fix audit (PR #5) |
-| Planned resolution | Not scheduled. The fix depends on [DECISION-002](open-decisions.md#decision-002). |
+| Affected area | `simulation.py`: `Simulator._plan_departures`, `Simulator._select_feasible_moves`; `pathfinder.py`: `Pathfinder.find_cooperative_path` |
+| Discovered during | Pathfinding and simulation test audit (PR #4), 2026-10-03; second variant during the BUG-001/002 fix audit (PR #5); deadlocks without weather during the dynamic-routing design (PR #7) |
+| Planned resolution | PR #9 (cooperative scheduling / reservations v2), following [ADR-013](decisions.md#adr-013) and [ADR-014](decisions.md#adr-014). Variant A also depends on [DECISION-008](open-decisions.md#decision-008). |
 | Regression test | Not yet |
-| Related PR | — |
+| Related PR | PR #7 (design and evidence) |
 
 **Violated expected behavior.** A run either delivers every aircraft or stops
 promptly with a clear error when delivery is impossible.
@@ -186,11 +186,64 @@ confirmed:
   that cannot move takes the lane's departure slot first, and the one that
   could move never gets it.
 
-**Conditions.** Seen in 2 of 6,000 randomized small graphs, both with dynamic
-weather enabled: weather delays push execution away from the original plan.
-Both reproducers behave the same before and after the PR #5 capacity fix.
+**Conditions.** Weather is not required.
 
-To reproduce, save a map as `repro.txt` and run it with its seed:
+- **PR #5 audit:** 2 of 6,000 randomized small graphs, both with dynamic
+  weather enabled.
+- **PR #7 audit:** 6 of 3,000 randomized small graphs with weather off, all of
+  them maps with distance lanes (1,524 of the 3,000). Both variants occur.
+  Method and generator are described in
+  [dynamic-routing.md](dynamic-routing.md#evidence).
+- All reproducers behave the same before and after the PR #5 capacity fix.
+
+**Reproducers without weather.** These are deterministic. Save one as
+`repro.txt` and run `uv run --locked python3 main.py repro.txt`. The run ends
+with `Error: Simulation exceeded 10000 turns.`
+
+Variant A without weather. D9 waits in `h2` for `h4`, and D11 waits in `h4`
+for `h2`. Both hubs have capacity 1. The planned routes park in the priority
+hub `h0` and come back:
+`S → h3 → h4 → h2 → h0 → h0 → h2 → h4 → h3 → S → E`.
+
+```txt
+nb_drones: 12
+start_hub: S 0 0
+end_hub: E 1 0
+hub: h0 2 0 [zone=priority max_drones=1]
+hub: h1 3 0 [zone=blocked]
+hub: h2 4 0
+hub: h3 5 0 [zone=restricted max_drones=2]
+hub: h4 6 0
+connection: h2-h0 [distance=80km]
+connection: h1-E [max_link_capacity=3 distance=700km]
+connection: h4-h2 [distance=150km]
+connection: h4-h3 [max_link_capacity=3 distance=700km]
+connection: h3-S [distance=700km]
+connection: S-E [distance=450km]
+```
+
+Variant B without weather. D10 waits in `S` for `h0`, which D11 occupies, and
+D11 waits in `h0` for `S`. `S` has unlimited capacity, so D11 could leave, but
+D10 takes the departure slot of lane `S-h0` first on every turn. Both planned
+routes return to the start through the priority hub `h0`:
+`S → h0 → S → E` and `S → h2 → h0 → S → E`.
+
+```txt
+nb_drones: 12
+start_hub: S 0 0
+end_hub: E 1 0
+hub: h0 2 0 [zone=priority max_drones=1]
+hub: h1 3 0 [zone=restricted max_drones=2]
+hub: h2 4 0
+connection: h1-E [distance=450km]
+connection: h2-h0 [max_link_capacity=1 distance=150km]
+connection: S-h2 [distance=1200km]
+connection: E-S [distance=700km]
+connection: S-h0 [max_link_capacity=3 distance=450km]
+```
+
+**Reproducers with weather.** To reproduce, save a map as `repro.txt` and run
+it with its seed:
 
 ```python
 import random
@@ -246,19 +299,45 @@ connection: h0-S [max_link_capacity=3 distance=150km]
 connection: S-E [max_link_capacity=1 distance=700km]
 ```
 
-**Root cause (confirmed).** `_plan_departures` allows one departure per
-distance lane per turn and assigns that slot before hub capacity is checked.
+**Root cause (confirmed).** Four causes combine.
 
-- **Variant A.** D7 waits in `h4` for `h3`, and D8 waits in `h3` for `h4`.
-  Both hubs have capacity 1 and share the 700 km lane `h4-h3`. A swap needs
-  both to leave in the same turn, which the one-departure rule never allows,
-  and a single departure is rejected because the other hub is still full.
-- **Variant B.** D6 (`h3` → `h1`) and D9 (`h1` → `h3`) share the lane `h1-h3`.
-  D6 is planned first and takes the slot, then its move is rejected because
-  `h1` (capacity 1) is full. D9 could leave, since `h3` has room, but the slot
-  is already used for that turn. The same happens every turn.
+1. **The deadlock itself.** `_plan_departures` allows one departure per
+   distance lane per turn and assigns that slot before hub capacity is
+   checked.
+   - **Variant A (weather reproducer).** D7 waits in `h4` for `h3`, and D8
+     waits in `h3` for `h4`. Both hubs have capacity 1 and share the 700 km
+     lane `h4-h3`. A swap needs both to leave in the same turn, which the
+     one-departure rule never allows, even though the lane's capacity is 3.
+     A single departure is rejected because the other hub is still full.
+   - **Variant B (weather reproducer).** D6 (`h3` → `h1`) and D9 (`h1` →
+     `h3`) share the lane `h1-h3`. D6 is planned first and takes the slot,
+     then its move is rejected because `h1` (capacity 1) is full. D9 could
+     leave, since `h3` has room, but the slot is already used for that turn.
+     The same happens every turn.
+2. **Opposite-direction traffic is planned.** The cooperative planner uses
+   cycles through other hubs as a way of waiting, so aircraft travel the same
+   lane out and back. Moving and waiting cost the same per turn, and the
+   priority-hub discount makes a loop through a priority hub cheaper than
+   waiting. Every no-weather deadlock found in PR #7 comes from such routes,
+   and every one of those loops runs through a priority hub.
+3. **Plans diverge without weather.** The planner books a hub only on the turn
+   of arrival. The executor holds the slot from departure
+   ([ADR-008](decisions.md#adr-008)) and hands out the one departure slot in
+   list order. Plans that the planner accepts are delayed during execution,
+   and the planned meeting points shift. Weather adds more divergence.
+4. **Nothing resolves it.** Routes are never re-planned, and deadlocks are not
+   detected, so the state repeats until the 10,000-turn limit.
 
-Routes are never re-planned, so the state repeats forever.
+**Planned fix.** In PR #9:
+
+- give a departure slot only to moves that pass the hub check (variant B);
+- make planner and executor share one capacity model;
+- stop using cycles as waiting;
+- detect and handle deadlocks, and fail with a clear error if a deadlock
+  cannot be resolved.
+
+See [ADR-013](decisions.md#adr-013), [ADR-014](decisions.md#adr-014), and
+[DECISION-008](open-decisions.md#decision-008).
 
 ---
 

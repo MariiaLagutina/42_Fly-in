@@ -20,6 +20,11 @@ Statuses: `Accepted`, `Superseded by ADR-XXX`, `Deprecated`.
 | [ADR-007](#adr-007) | Production bugfixes are separate from test-only pull requests | Accepted |
 | [ADR-008](#adr-008) | Hub capacity counts aircraft flying towards the hub | Accepted |
 | [ADR-009](#adr-009) | Python 3.14 is the single supported version; CI runs the local quality gates | Accepted |
+| [ADR-010](#adr-010) | An aircraft in transit is committed to its leg | Accepted |
+| [ADR-011](#adr-011) | Routing decisions are made at hubs; replanning is triggered by events | Accepted |
+| [ADR-012](#adr-012) | Weather comes from a provider as a snapshot of the current state | Accepted |
+| [ADR-013](#adr-013) | Routing uses explicit state; planner and executor share one capacity model | Accepted |
+| [ADR-014](#adr-014) | Waiting happens in place; deadlocks are detected, not waited out | Accepted |
 
 ---
 
@@ -327,3 +332,280 @@ things.
   changes `requires-python` and adds a matrix to CI.
 - Changing the supported version means updating `pyproject.toml`,
   `.python-version`, `uv.lock`, the CI workflow, and the README together.
+
+---
+
+## ADR-010
+
+### An aircraft in transit is committed to its leg
+
+- **Status:** Accepted
+- **Date:** 2026-10-04
+
+**Context.** Routing is becoming dynamic: aircraft will change their routes
+as the weather and traffic change ([dynamic-routing.md](dynamic-routing.md)).
+The movement rules already say an aircraft on a multi-turn leg cannot wait
+on the connection. The open question was whether a route may also change
+while an aircraft is flying a leg.
+
+**Decision.** Once an aircraft departs on a leg, it is committed to that leg
+until it arrives:
+
+- it is not replanned in flight;
+- its travel time is fixed at departure;
+- later weather changes do not affect the leg already started;
+- its destination hub's slot stays held, as in [ADR-008](#adr-008).
+
+All routing decisions are made at hubs.
+
+**Rationale.** It matches the existing movement rules and keeps execution
+simple to reason about: an aircraft in the air has exactly one possible
+outcome. It also keeps the hub-capacity guarantee of ADR-008, which depends
+on knowing where every aircraft in transit will arrive.
+
+**Consequences.**
+
+- An aircraft that departs just before a lane closes still completes that
+  leg. Weather affects it only at its next decision point.
+- Weather diversion ([ADR-011](#adr-011)) starts from a hub, never mid-leg.
+
+---
+
+## ADR-011
+
+### Routing decisions are made at hubs; replanning is triggered by events
+
+- **Status:** Accepted
+- **Date:** 2026-10-04
+
+**Context.** Every route is planned once, before the first turn, and never
+changes. With weather, most aircraft on the larger maps fall behind their
+plans (up to 97% on the challenger map), and an aircraft facing a closed lane
+can only wait. A single cooperative route search costs up to about 20 ms on
+the largest map, so searching again for every aircraft on every turn is too
+expensive. Evidence is in [dynamic-routing.md](dynamic-routing.md#evidence).
+
+**Decision.**
+
+- **Decision point.** Each turn an aircraft spends at a hub, routing policy
+  decides what it does that turn.
+- **Replanning trigger.** A new route search runs only when a trigger fires.
+  The minimum triggers are:
+  - the remaining route is invalidated: under the current weather it is
+    unavailable or contains an unusable lane;
+  - the aircraft has waited without progress for a number of consecutive
+    turns that reaches a threshold.
+- **Threshold.** The threshold is an explicit, configurable routing-policy
+  parameter. Its default is chosen from evidence when it is implemented.
+- **Routing options.** At a decision point, policy chooses one of:
+  - continue toward the destination on the current route;
+  - wait in the current hub, only if that hub is safe;
+  - reroute toward the destination;
+  - divert to a nearby safe hub because of weather.
+- **Weather can change the goal.** Weather may change the aircraft's
+  immediate routing goal, not only the cost or availability of a lane.
+- **Backtracking.** Returning to a previously visited hub is a valid result of
+  a decision made on the current state.
+- **Comparing options.** Policy compares the options using the current state.
+  The delay model it uses (estimated time until a lane reopens, ETA, fallbacks)
+  is not part of this decision ([DECISION-006](open-decisions.md#decision-006)).
+
+**Rationale.**
+
+- Separating decision points from triggers keeps the common case cheap:
+  following a valid route costs nothing extra, and a search runs only when
+  something changed.
+- Diversion and backtracking are needed because weather can make both the
+  route ahead and the current position a poor place to be. A global ban on
+  revisiting hubs would forbid exactly these decisions.
+
+**Consequences.**
+
+- Waiting is no longer the automatic answer when the destination is
+  unreachable. It is valid only when the current hub is safe.
+- Diversion needs a definition of a safe hub and of the diversion target
+  ([DECISION-004](open-decisions.md#decision-004)), and emergency hub capacity
+  ([ADR-013](#adr-013), [DECISION-005](open-decisions.md#decision-005)).
+- Turn counts with weather enabled will change. Without weather, execution on
+  the bundled maps currently follows the plan exactly, so no trigger fires
+  and this decision alone does not change routes there.
+- Replanning makes [DECISION-002](open-decisions.md#decision-002) decided.
+
+---
+
+## ADR-012
+
+### Weather comes from a provider as a snapshot of the current state
+
+- **Status:** Accepted
+- **Date:** 2026-10-04
+
+**Context.** `WeatherSystem` draws from the global `random` module and mutates
+`Connection` objects in place. Tests cannot script a weather sequence, they
+must save and restore global random state ([ADR-003](#adr-003)), and the code
+draws random numbers even when no storm can start. Real weather is planned
+later as another source, and it must never be needed to run the tests.
+
+**Decision.**
+
+- The weather boundary is
+  `WeatherProvider → WeatherState → Simulator / routing state`.
+- A `WeatherProvider` produces the weather for a turn. Planned providers:
+  - `NoWeather`;
+  - `RandomWeather`, seeded, with its own `random.Random` instance;
+  - `ScriptedWeather`, a fixed schedule for deterministic tests;
+  - later, a real-weather provider.
+- `WeatherState` is a snapshot of the current, normalized weather in the
+  project's own domain terms. It describes what is observed now. Providers
+  are not required to supply forecasts or expected durations.
+- The simulator turns changes between snapshots into `WeatherChanged`
+  events. Routing reads `WeatherState` and never calls a provider, an HTTP
+  client, or an external API.
+- Random weather stays available as a normal mode. The test suite never
+  depends on the global `random` module or on network access.
+- Planner and executor will compute travel time in one place.
+  [DECISION-001](open-decisions.md#decision-001) remains open until PR #10.
+
+**Rationale.** A snapshot of observed weather is something every source can
+supply, including a real-weather API that cannot predict how many simulation
+turns a condition will last. Owning the random generator makes runs
+reproducible from a seed and lets tests script weather without touching
+global state.
+
+**Consequences.**
+
+- `WeatherSystem` is replaced by providers. Connection objects stop being
+  the place where weather lives.
+- ADR-003's save-and-restore fixture becomes unnecessary once no code path
+  uses the global `random` module.
+- Any routing policy that needs an expected delay must estimate it itself or
+  use optional provider information
+  ([DECISION-006](open-decisions.md#decision-006)).
+- Whether hubs also have weather is part of
+  [DECISION-004](open-decisions.md#decision-004).
+
+---
+
+## ADR-013
+
+### Routing uses explicit state; planner and executor share one capacity model
+
+- **Status:** Accepted
+- **Date:** 2026-10-04
+
+**Context.** The planner and the executor apply different capacity rules:
+
+- the planner books a hub only on the turn an aircraft arrives;
+- the executor holds the slot from departure ([ADR-008](#adr-008)) and gives
+  each distance lane one departure per turn.
+
+Without any weather, 487 of 3,000 random graphs are delivered later than
+planned, and 6 deadlock. Reservations exist only while routes are planned
+before the first turn. Route search also reads model objects and zone fields
+directly, which will not survive dynamic routing.
+
+**Decision.**
+
+- **Explicit inputs.** Route search depends only on explicit inputs and is
+  deterministic with respect to them:
+  - the static network;
+  - the current `WeatherState`;
+  - the current turn;
+  - current occupancy and commitments, including aircraft in transit;
+  - live reservations, once they exist;
+  - the routing request.
+
+  It does not read `Drone` objects as hidden state, mutate the graph, use the
+  global `random` module, or call a weather provider.
+- **One capacity model.** The planner and the executor apply the same capacity
+  rules. Evaluated against the same state and the same rules, they must not
+  disagree about resource feasibility. A move or reservation that the planner
+  accepts as capacity-feasible must not be rejected by the executor merely
+  because the executor applies a different capacity model. This does not
+  promise that a whole schedule always executes: scheduling, departure, and
+  deadlock semantics are refined in PR #9 and
+  [DECISION-008](open-decisions.md#decision-008).
+- **Reservations v2.**
+  - Reservations are live state, not a one-time table built before the
+    simulation.
+  - Each reservation is owned by an aircraft.
+  - On a reroute, the aircraft's future reservations are released. Its current
+    hub occupancy and its committed transit stay.
+- **Executor as a safety layer.** The executor keeps validating every move at
+  runtime.
+- **Two layers of hub capacity.** Normal capacity is available to all routing
+  and planning. Weather emergency overflow is available only to qualifying
+  weather-diversion arrivals, and ordinary routing never consumes it.
+  Overflow never changes a hub's normal capacity. Its amount is policy or
+  configuration, not an architectural constant. The details are in
+  [DECISION-005](open-decisions.md#decision-005).
+- **Scope.** PR #8 adds dynamic replanning without reservations v2. Planner,
+  executor, and reservations are aligned in PR #9.
+
+**Rationale.**
+
+- A plan is only useful if execution judges its moves by the same rules.
+  With two capacity models, plans diverge even in a world that never changes.
+- Explicit inputs make route search testable on its own and keep weather
+  sources replaceable.
+- Keeping the executor's checks means a planning mistake can delay an aircraft
+  but never break a capacity rule.
+
+**Consequences.**
+
+- Cooperative planning is kept. It keeps the bundled maps within their turn
+  budgets ([ADR-005](#adr-005)).
+- Aligning the capacity model may change routes and turn counts on the
+  bundled maps. Turn budgets stay the acceptance criterion.
+- The invariant checker must be able to tell overflow arrivals from capacity
+  violations, so diversions must be visible in events.
+
+---
+
+## ADR-014
+
+### Waiting happens in place; deadlocks are detected, not waited out
+
+- **Status:** Accepted
+- **Date:** 2026-10-04
+
+**Context.** [BUG-003](bug-triage.md#bug-003) deadlocks also occur without
+weather. In all 6 deadlocks found without weather, the opposite-direction
+traffic comes from routes that leave a hub and come back only to pass time,
+and every one of those loops runs through a priority hub, whose cost discount
+makes a loop cheaper than waiting. The same holds for 715 of the 1,516
+revisiting routes in the random audit.
+When aircraft block each other, nothing detects it, and the run continues
+until the 10,000-turn limit.
+
+**Decision.**
+
+- **Waiting is staying in the current hub.** Routes must not create
+  artificial cycles through other hubs as a way of waiting.
+- **Revisits are not banned.** A route may return to a hub when the current
+  state makes that the right decision, for example backtracking or a weather
+  diversion ([ADR-011](#adr-011)). When a revisit is legitimate and when it
+  should be limited stays open until PR #9
+  ([DECISION-007](open-decisions.md#decision-007)).
+- **Departure slots.** A distance lane's departure slot is given only to a
+  move that has passed the hub-capacity check (fixes BUG-003 variant B).
+- **Deadlock detection.** Deadlocks are detected from a wait-for graph between
+  aircraft at hubs. A cycle that no weather change or arrival can release is a
+  deadlock.
+- **Deadlock handling.** A detected deadlock is resolved where possible. If it
+  cannot be resolved, the run stops with a clear error instead of reaching the
+  turn limit. The resolution strategy is designed in PR #9.
+
+**Rationale.** Waiting in place costs the same time without using lanes or
+other hubs, so artificial cycles only add traffic. Detection turns a silent
+hang into either a resolved situation or an explicit, diagnosable failure.
+
+**Consequences.**
+
+- Route cost or search must make an artificial cycle no cheaper than waiting,
+  including through priority hubs.
+- Four routes on the bundled maps currently leave the start and return to it.
+  They may change.
+- Whether the one-departure-per-turn rule applies per lane or per direction
+  is open ([DECISION-008](open-decisions.md#decision-008)). In both variant A
+  reproducers it blocks the swap even when lane capacity would allow it.

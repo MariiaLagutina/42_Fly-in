@@ -12,8 +12,13 @@ Statuses: `OPEN`, `NEEDS EVIDENCE`, `DECIDED`.
 | ID | Question | Status | Blocks |
 | --- | --- | --- | --- |
 | [DECISION-001](#decision-001) | Does a restricted hub add travel time on distance-based lanes? | `OPEN` | — |
-| [DECISION-002](#decision-002) | What should an aircraft do when execution diverges from its plan? | `OPEN` | [BUG-003](bug-triage.md#bug-003) |
+| [DECISION-002](#decision-002) | What should an aircraft do when execution diverges from its plan? | `DECIDED` | — |
 | [DECISION-003](#decision-003) | How are turns without movement represented in the output? | `OPEN` | [BUG-004](bug-triage.md#bug-004) |
+| [DECISION-004](#decision-004) | What makes a hub or route unsafe, and where does a weather diversion go? | `OPEN` | Weather diversion |
+| [DECISION-005](#decision-005) | How does weather emergency overflow work? | `OPEN` | Weather diversion |
+| [DECISION-006](#decision-006) | How does routing policy compare waiting, rerouting, and diverting? | `NEEDS EVIDENCE` | PR #8 routing policy |
+| [DECISION-007](#decision-007) | When is revisiting a hub legitimate? | `OPEN` | PR #9 |
+| [DECISION-008](#decision-008) | Does the one-departure-per-turn rule apply per lane or per direction? | `OPEN` | [BUG-003](bug-triage.md#bug-003) variant A |
 
 ---
 
@@ -22,6 +27,9 @@ Statuses: `OPEN`, `NEEDS EVIDENCE`, `DECIDED`.
 ### Does a restricted hub add travel time on distance-based lanes?
 
 - **Status:** `OPEN`
+- **To be decided in:** PR #10, weather-aware routing (travel-time model). It
+  does not affect the dynamic-routing semantics of
+  [dynamic-routing.md](dynamic-routing.md).
 
 **Context.** The project has two travel-time models:
 
@@ -65,7 +73,27 @@ entering a normal one. The bundled maps contain this case three times
 
 ### What should an aircraft do when execution diverges from its plan?
 
-- **Status:** `OPEN`
+- **Status:** `DECIDED`
+- **Decided in:**
+  - [ADR-011](decisions.md#adr-011): decision points, replanning triggers, and
+    routing options;
+  - [ADR-013](decisions.md#adr-013): one capacity model and live reservations;
+  - [ADR-014](decisions.md#adr-014): waiting in place and deadlock detection.
+
+  The design and its evidence are in
+  [dynamic-routing.md](dynamic-routing.md).
+
+In short:
+
+- An aircraft at a hub is replanned when its remaining route becomes unusable
+  or it stops making progress (option 3, on triggers).
+- Deadlocks are detected and handled (option 2).
+- Planner and executor share one capacity model, so they do not disagree about
+  resource feasibility when they evaluate the same state.
+- Re-planning every aircraft on every weather change (option 4) was not
+  chosen.
+
+The text below is the question as it was recorded before the decision.
 
 **Context.** Every route is planned once, before the first turn, with
 reservation tables that assume each aircraft moves exactly on schedule.
@@ -113,6 +141,17 @@ execution.
 - The runtime cost of re-planning on the largest maps (challenger, Europe).
 - Whether deadlocks occur without weather.
 
+**Evidence collected (PR #7).**
+
+- **Bundled maps without weather:** no divergence on any of the 12 maps.
+- **Bundled maps with weather:** 12–97% of aircraft are delivered late.
+- **3,000 random graphs without weather:** 487 diverge and 6 deadlock, so
+  deadlocks occur without weather.
+- **Cost of one cooperative route search:** up to about 20 ms on the challenger
+  map and 5 ms on Europe.
+
+Details are in [dynamic-routing.md](dynamic-routing.md#evidence).
+
 ---
 
 ## DECISION-003
@@ -120,6 +159,8 @@ execution.
 ### How are turns without movement represented in the output?
 
 - **Status:** `OPEN`
+- **To be decided in:** PR #11, simulation and output correctness, together
+  with how waiting, reroutes, and diversions are shown.
 
 **Context.** The output format of the original assignment prints one line per
 turn and omits aircraft that do not move. On long distance-based legs a turn
@@ -149,3 +190,212 @@ lower than the number of simulated turns (see
   line count.
 - Which option keeps the subject-compatible output unchanged on maps without
   distance.
+
+---
+
+## DECISION-004
+
+### What makes a hub or route unsafe, and where does a weather diversion go?
+
+- **Status:** `OPEN`
+- **Needed for:** weather diversion ([ADR-011](decisions.md#adr-011)). Without
+  it, PR #8 can ship continue, wait, and reroute, and diversion follows later.
+
+**Context.** [ADR-011](decisions.md#adr-011) lets an aircraft divert to a
+nearby safe hub because of weather, and allows waiting only in a safe hub.
+Today weather exists only on lanes: a lane is open or closed, and its
+condition changes its travel time. No hub is ever unsafe.
+
+**Questions.**
+
+- **Unsafe hub.** Does a hub become unsafe through weather of its own, through
+  the state of its lanes (for example, all of its onward lanes closed), or
+  never in the first version?
+- **Unsafe route.** Is a route unsafe only when a lane on it is closed, or also
+  under conditions that leave it open (storm nearby, severe rain)?
+- **Safe target.** What makes a hub a suitable safe target: not unsafe itself,
+  reachable now over open lanes, with normal or emergency room, and not the
+  start or end hub?
+- **"Nearby".** Is it the shortest travel time over currently open lanes, a
+  maximum number of legs, or something else?
+- **After the diversion.** What does the aircraft do once it has diverted:
+  stay until a trigger fires, or plan toward the destination at its next
+  decision point?
+
+**Possible options.**
+
+1. In the first version, hubs are never unsafe. A route is unsafe when it is
+   unavailable. Diversion means heading for the nearest hub from which the
+   destination is still reachable over open lanes.
+2. Add hub weather to `WeatherState` ([ADR-012](decisions.md#adr-012)), so a
+   hub itself can be unsafe, and divert away from it.
+3. Define unsafe from the state of a hub's lanes, without hub weather.
+
+**Evidence needed.**
+
+- What hub weather would add over lane weather on the bundled maps.
+- What a real-weather source can provide per hub and per lane (Part 4 of the
+  roadmap).
+
+---
+
+## DECISION-005
+
+### How does weather emergency overflow work?
+
+- **Status:** `OPEN`
+- **Needed for:** weather diversion. Needed in PR #8 only if diversion is.
+
+**Context.** [ADR-013](decisions.md#adr-013) splits hub capacity into normal
+capacity and weather emergency overflow:
+
+- only qualifying weather-diversion arrivals may use the overflow;
+- ordinary routing and planning never consume it;
+- it never changes the hub's normal capacity;
+- the amount is policy, not a constant.
+
+**Questions.**
+
+- **Who qualifies.** Only diverting aircraft, or also an aircraft arriving
+  from a leg that was closed behind it?
+- **Amount.** A fixed number per hub, a fraction of normal capacity, or
+  configured per map or run?
+- **Start and end hubs.** Their capacity is unlimited today. Does overflow
+  apply to them at all?
+- **Leaving overflow.** How long may a hub stay above normal capacity? Must
+  overflowing aircraft leave first once their route is available?
+- **Other arrivals.** While a hub is above normal capacity, are ordinary
+  arrivals refused until it is back below it?
+- **Visibility.** How do events and the invariant checker show that an
+  arrival used overflow, so that it is not reported as a capacity violation?
+
+**Possible options.**
+
+1. Overflow of `k` aircraft per hub, with `k` a policy parameter and `1` as
+   the first default if evidence supports it. Only diverting aircraft qualify.
+   Ordinary arrivals are refused while the hub is above normal capacity.
+2. Overflow proportional to normal capacity.
+3. No overflow in the first version: a diversion may only target a hub with
+   normal room.
+
+**Evidence needed.**
+
+- How often a diversion would find no hub with normal room, on the bundled
+  maps with weather.
+
+---
+
+## DECISION-006
+
+### How does routing policy compare waiting, rerouting, and diverting?
+
+- **Status:** `NEEDS EVIDENCE`
+- **Needed for:** routing policy in PR #8. The weather-aware cost parts may
+  move to PR #10.
+
+**Context.** [ADR-011](decisions.md#adr-011) requires routing policy to choose
+between continuing, waiting, rerouting, and diverting using the current state.
+[ADR-012](decisions.md#adr-012) does not require weather providers to supply
+forecasts or how long a condition will last, because a real-weather source
+may not know that.
+
+**Questions.**
+
+- How does policy estimate the cost of waiting for a closed lane without a
+  forecast?
+- When is a longer route better than waiting?
+- How do the no-progress threshold and the waiting estimate interact?
+- What is the fallback when no estimate is possible?
+
+**Possible options.**
+
+1. **Fixed estimate.** Treat a closed lane as closed for an assumed number of
+   turns (a policy parameter), and compare ETAs.
+2. **Prefer moving.** Reroute whenever an open alternative exists. Otherwise
+   wait until the no-progress threshold.
+3. **Learned estimate.** Estimate expected closure from what the simulation
+   has observed so far in the run, with no provider support.
+4. **Optional hints.** Use expected durations when a provider offers them as
+   optional information, and fall back to option 1 or 2 otherwise.
+
+**Evidence needed.**
+
+- Turn counts on the bundled maps with weather under each option, using
+  seeded `RandomWeather`.
+- The cost of extra route searches each option causes.
+
+---
+
+## DECISION-007
+
+### When is revisiting a hub legitimate?
+
+- **Status:** `OPEN`
+- **To be decided in:** PR #9.
+
+**Context.** [ADR-014](decisions.md#adr-014) forbids cycles used as a way of
+waiting, and [ADR-011](decisions.md#adr-011) allows returning to a hub when the
+state changes (backtracking, weather diversion). Between the two:
+
+- A route found by a single search may still contain a revisit that is not
+  waiting, for example a detour around a lane that is closed now and will be
+  closed later.
+- A sequence of reroutes could make an aircraft oscillate between hubs.
+
+**Questions.**
+
+- **Within one route.** May a single planned route revisit a hub at all, or
+  only routes produced by separate decisions?
+- **Oscillation.** Is a limit or penalty needed for an aircraft moving back and
+  forth between the same hubs across decisions?
+- **Telling them apart.** How does the planner distinguish "waiting through a
+  cycle" from a legitimate detour?
+
+**Possible options.**
+
+1. **Simple routes.** A single route never repeats a hub. Revisits happen only
+   across separate decisions, with an oscillation limit.
+2. **Cost-based.** Revisits are allowed but never cheaper than waiting in
+   place, so they appear only when they reach the goal sooner.
+3. **No rule.** Detect oscillation only through the no-progress trigger.
+
+**Evidence needed.**
+
+- How many legitimate revisits remain on the bundled maps and in the random
+  audit once artificial waiting cycles are gone.
+
+---
+
+## DECISION-008
+
+### Does the one-departure-per-turn rule apply per lane or per direction?
+
+- **Status:** `OPEN`
+- **To be decided in:** PR #9, with [BUG-003](bug-triage.md#bug-003).
+
+**Context.** The executor and the planner allow one departure per turn on each
+distance lane, regardless of direction, in addition to `max_link_capacity`.
+In both variant A reproducers of BUG-003, two aircraft need to swap hubs over
+a lane with capacity 3. The capacity allows it, but the departure rule never
+lets both leave in the same turn.
+
+**Possible options.**
+
+1. **Per lane** (current behavior). Swaps on distance lanes need deadlock
+   handling.
+2. **Per direction.** Two aircraft may leave in opposite directions in the
+   same turn if lane capacity allows it.
+3. **No departure rule.** Only `max_link_capacity` limits a lane.
+
+**Impact.**
+
+- Whether BUG-003 variant A can be resolved without deadlock handling.
+- Turn counts on the bonus maps, which are the only bundled maps with distance
+  lanes.
+- The invariant checker, if the rule becomes an invariant.
+
+**Evidence needed.**
+
+- What the rule is meant to model (runway or takeoff separation, a single
+  air corridor).
+- How each option changes turn counts on the bonus maps.
