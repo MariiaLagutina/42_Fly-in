@@ -82,15 +82,17 @@ execution.
 
 - The aircraft keeps its planned route and waits until its next move becomes
   possible.
-- Each turn is checked locally against the current occupancy.
+- Each turn is checked locally: hub load includes aircraft already flying
+  towards a hub ([ADR-008](decisions.md#adr-008)).
 - Routes are never re-planned, including around lanes closed by weather. The
   README documents this limitation.
 
 **Possible options.**
 
-1. Keep local execution checks and make them strictly correct. This is
-   required anyway for [BUG-001](bug-triage.md#bug-001) and
-   [BUG-002](bug-triage.md#bug-002), and alone does not prevent
+1. Keep local execution checks and make them strictly correct. This part is
+   done: [BUG-001](bug-triage.md#bug-001) and
+   [BUG-002](bug-triage.md#bug-002) were fixed this way in PR #5
+   ([ADR-008](decisions.md#adr-008)). Alone it does not prevent
    [BUG-003](bug-triage.md#bug-003).
 2. Add deadlock detection to option 1 and resolve it, for example by letting
    one aircraft step aside or by re-planning the aircraft involved.

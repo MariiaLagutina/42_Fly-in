@@ -18,6 +18,7 @@ Statuses: `Accepted`, `Superseded by ADR-XXX`, `Deprecated`.
 | [ADR-005](#adr-005) | Bundled maps are reference scenarios with documented turn budgets | Accepted |
 | [ADR-006](#adr-006) | Known bugs are not encoded as expected behavior in tests | Accepted |
 | [ADR-007](#adr-007) | Production bugfixes are separate from test-only pull requests | Accepted |
+| [ADR-008](#adr-008) | Hub capacity counts aircraft flying towards the hub | Accepted |
 
 ---
 
@@ -229,8 +230,8 @@ same pull request mixes two kinds of review: "are these tests right?" and
 Production bugs it reveals are recorded in [bug-triage.md](bug-triage.md) and
 fixed in separate pull requests that contain the fix together with its
 regression test. For example, [BUG-001](bug-triage.md#bug-001) and
-[BUG-002](bug-triage.md#bug-002) are fixed in a dedicated pull request after
-the pathfinding and simulation test suite.
+[BUG-002](bug-triage.md#bug-002), found by the pathfinding and simulation
+test suite (PR #4), were fixed in a separate pull request (PR #5).
 
 **Rationale.** Each pull request has one purpose and can be reviewed and
 reverted on its own. The fix lands with the existing invariant suite already
@@ -238,3 +239,47 @@ in place as a safety net.
 
 **Consequences.** There is a short period in which a known bug is documented
 but not yet fixed.
+
+---
+
+## ADR-008
+
+### Hub capacity counts aircraft flying towards the hub
+
+- **Status:** Accepted
+- **Date:** 2026-10-03
+
+**Context.** The movement rules say an aircraft on a multi-turn leg must
+arrive after the leg's travel time and cannot wait on the connection. The
+simulator used to check a destination's capacity only at departure, against
+its current occupancy, and placed arriving aircraft without any check. It
+also counted a hub as freed by every planned departure, including departures
+it later rejected. Both let hubs exceed their capacity
+([BUG-001](bug-triage.md#bug-001), [BUG-002](bug-triage.md#bug-002)).
+
+**Decision.**
+
+- For capacity checks during execution, a hub's load is the aircraft in it
+  plus the aircraft already in transit towards it. An arrival slot is held
+  from departure until arrival.
+- Each turn, all planned moves are validated as a set before any is applied.
+  A hub counts as freed only by departures that are kept. Rejecting a move can
+  invalidate others, so validation repeats until no move is rejected.
+- `CapacitySnapshot` keeps reporting physical occupancy (aircraft in the hub),
+  not this load.
+
+**Rationale.** Holding the slot from departure is the simplest rule that
+guarantees an in-flight aircraft always has room on arrival, without
+predicting future departures. Validating moves as a set keeps the existing
+rule that aircraft leaving a hub free their place in the same turn, while
+never counting a departure that does not happen.
+
+**Consequences.**
+
+- Hub capacity can no longer be exceeded during execution. The randomized
+  audit of 6,000 small graphs dropped from 474 violations to 0.
+- A hub's slot is held for the whole multi-turn leg, which is more
+  conservative than the planner's reservation at arrival time. On the bundled
+  maps this changes nothing: output is byte-for-byte identical.
+- The rule does not prevent deadlocks between aircraft waiting for each
+  other ([BUG-003](bug-triage.md#bug-003)).

@@ -126,7 +126,8 @@ class Simulator:
     def _execute_turn(self, turn_number: int) -> SimulationTurn:
         """
         A turn is processed in phases: finish existing transit, plan departures
-        from a stable snapshot, then apply moves that pass capacity checks.
+        from a stable snapshot, keep the moves that fit hub capacity, then
+        apply them.
         """
         turn = SimulationTurn(turn_number)
         self._emit(TurnStarted(turn_number))
@@ -145,16 +146,16 @@ class Simulator:
             connection_usage, moved_drone_ids
         )
 
-        outgoing_counts = self._count_outgoing_by_zone(planned_moves)
+        feasible_moves = self._select_feasible_moves(
+            planned_moves, connection_usage
+        )
 
         self._apply_planned_moves(
             turn,
             turn_number,
-            planned_moves,
+            feasible_moves,
             zone_occupancy,
             moved_drone_ids,
-            outgoing_counts,
-            connection_usage,
         )
 
         self._emit(TurnFinished(turn_number, tuple(turn.movements)))
@@ -259,6 +260,73 @@ class Simulator:
             outgoing_counts[name] = outgoing_counts.get(name, 0) + 1
         return outgoing_counts
 
+    def _select_feasible_moves(
+        self,
+        planned_moves: list[tuple[Drone, Connection]],
+        connection_usage: dict[str, int],
+    ) -> list[tuple[Drone, Connection]]:
+        """
+        Keep only the moves whose destination still has room after the turn.
+
+        A hub's load includes aircraft flying towards it: an aircraft on a
+        multi-turn leg cannot wait on the connection, so its arrival slot is
+        held from departure. A hub is freed only by departures that are kept,
+        so rejecting one move can invalidate others; selection repeats until
+        no move is rejected. The selection only shrinks, so it terminates.
+        """
+        load = self._count_hub_load()
+        selected = planned_moves
+
+        while True:
+            leaving = self._count_outgoing_by_zone(selected)
+            admitted: dict[str, int] = {}
+            kept: list[tuple[Drone, Connection]] = []
+
+            for drone, connection in selected:
+                next_zone = drone.next_zone()
+                if next_zone is None:
+                    continue
+                name = next_zone.name
+                used = (
+                    load.get(name, 0)
+                    - leaving.get(name, 0)
+                    + admitted.get(name, 0)
+                )
+                if used >= next_zone.effective_capacity():
+                    continue
+                admitted[name] = admitted.get(name, 0) + 1
+                kept.append((drone, connection))
+
+            if len(kept) == len(selected):
+                break
+            selected = kept
+
+        kept_ids = {drone.drone_id for drone, _connection in selected}
+        for drone, connection in planned_moves:
+            conn_name = connection.name()
+            if (
+                drone.drone_id not in kept_ids
+                and connection_usage.get(conn_name, 0) > 0
+            ):
+                connection_usage[conn_name] -= 1
+
+        return selected
+
+    def _count_hub_load(self) -> dict[str, int]:
+        """Aircraft in each hub, plus aircraft flying towards it."""
+        load: dict[str, int] = {}
+        for drone in self.drones:
+            if drone.is_delivered():
+                continue
+            hub = drone.current_zone
+            if (
+                drone.state == DroneState.IN_TRANSIT
+                and drone.transit_target is not None
+            ):
+                hub = drone.transit_target
+            load[hub.name] = load.get(hub.name, 0) + 1
+        return load
+
     def _apply_planned_moves(
         self,
         turn: SimulationTurn,
@@ -266,27 +334,14 @@ class Simulator:
         planned_moves: list[tuple[Drone, Connection]],
         zone_occupancy: dict[str, int],
         moved_drone_ids: set[int],
-        outgoing_counts: dict[str, int],
-        connection_usage: dict[str, int],
     ) -> None:
-        incoming_counts: dict[str, int] = {}
-
+        """Apply moves already checked by `_select_feasible_moves`."""
         for drone, connection in planned_moves:
             next_zone = drone.next_zone()
             if next_zone is None:
                 continue
 
             current_count = zone_occupancy.get(next_zone.name, 0)
-            outgoing = outgoing_counts.get(next_zone.name, 0)
-            incoming = incoming_counts.get(next_zone.name, 0)
-            available_count = current_count - outgoing + incoming
-
-            if available_count >= next_zone.effective_capacity():
-                conn_name = connection.name()
-                if connection_usage.get(conn_name, 0) > 0:
-                    connection_usage[conn_name] -= 1
-                continue
-
             zone_occupancy[drone.current_zone.name] -= 1
 
             # Pathfinder owns distance and weather travel-time rules.
@@ -317,7 +372,6 @@ class Simulator:
                 continue
 
             zone_occupancy[next_zone.name] = current_count + 1
-            incoming_counts[next_zone.name] = incoming + 1
             origin = drone.current_zone.name
             moved_to = drone.advance()
 
