@@ -4,9 +4,10 @@ Design for moving Maria's Airlanes from routes planned once before the first
 turn to routing decisions made during the simulation, as the world changes.
 
 This document describes the current model, the evidence collected for this
-design, the target model, and the decisions that are still open. It does not
-change any code. Implementation follows in later pull requests (see
-[Delivery plan](#delivery-plan)).
+design, the target model, and the decisions that are still open.
+Implementation happens in a series of pull requests (see
+[Delivery plan](#delivery-plan)). PR #8 laid the transport and weather
+foundation; dynamic replanning starts in PR #9.
 
 Accepted decisions are recorded as ADRs in [decisions.md](decisions.md):
 
@@ -17,6 +18,12 @@ Accepted decisions are recorded as ADRs in [decisions.md](decisions.md):
 | [ADR-012](decisions.md#adr-012) | Weather comes from a provider as a snapshot of the current state |
 | [ADR-013](decisions.md#adr-013) | Routing uses explicit state; planner and executor share one capacity model |
 | [ADR-014](decisions.md#adr-014) | Waiting happens in place; deadlocks are detected, not waited out |
+| [ADR-015](decisions.md#adr-015) | Every hub is a safe waiting location; hub capacity has one layer |
+| [ADR-016](decisions.md#adr-016) | Transport mode is map data; weather acts through one set of transport rules |
+| [ADR-017](decisions.md#adr-017) | Road is a fallback with a consecutive-road budget |
+
+ADR-015 replaces the parts of ADR-011 and ADR-013 about unsafe hubs, weather
+diversion, and emergency hub capacity. The sections below already reflect it.
 
 Questions that still need a decision are listed in
 [Open questions](#open-questions) and tracked in
@@ -25,6 +32,10 @@ Questions that still need a decision are listed in
 ---
 
 ## Current model
+
+This section describes the model as it was when this design started
+(`52015cf`, before PR #8). [Since PR #8](#since-pr-8) lists what the
+foundation changed.
 
 ```text
 Parser → Graph
@@ -53,13 +64,30 @@ every turn: WeatherSystem.update_weather (global random)
   planner and the executor: from the destination's zone type on lanes without
   distance, and from distance and weather on distance lanes.
 
+### Since PR #8
+
+- **Transport modes.** Each connection has a transport mode, `air` or `road`,
+  taken from the map ([ADR-016](decisions.md#adr-016)). It is no longer
+  inferred from distance.
+- **Transport rules.** `transport.py` turns the current weather and a
+  connection's mode and data into availability and travel time. Air legs
+  close in storm and snow; road legs stay open and get slower.
+- **Weather providers.** The simulator takes a `WeatherProvider`
+  (`NoWeather`, seeded `RandomWeather`, `ScriptedWeather`) and keeps the
+  current `WeatherState` ([ADR-012](decisions.md#adr-012)). Connections no
+  longer store weather, and no production code uses the global `random`
+  module.
+- **Unchanged.** Routes are still planned once, before the first turn, in
+  clear weather. Without weather, every bundled map produces exactly the same
+  output as before.
+
 ---
 
 ## Evidence
 
-Measured on `main` at `52015cf` with throwaway scripts that import the
-production modules without changing them. The scripts are not part of the
-repository. The method below is enough to rebuild them.
+Measured on `main` at `52015cf`, before PR #8, with throwaway scripts that
+import the production modules without changing them. The scripts are not part
+of the repository. The method below is enough to rebuild them.
 
 ### Method
 
@@ -87,6 +115,11 @@ repository. The method below is enough to rebuild them.
   - **Aircraft:** 1–12.
 
   1,524 of the 3,000 maps have distance lanes. Weather is off.
+
+These measurements use the semantics of the time: a lane under 200 km was a
+road, and storm and snow closed every lane. To repeat them after PR #8, mark
+generated lanes under 200 km with `mode=road`. Road lanes now stay open in
+storm and snow, so weather runs on maps with road lanes will differ.
 
 ### Bundled maps
 
@@ -219,70 +252,69 @@ Two different things happen at a hub:
     turns that reaches a configurable threshold.
 
 A full route search does not run on every turn. The threshold is an explicit,
-configurable routing-policy parameter. Its default is chosen in PR #8 from
+configurable routing-policy parameter. Its default is chosen in PR #9 from
 evidence.
 
 ### Routing options
 
-At a decision point, routing policy chooses one of four options:
+See [ADR-011](decisions.md#adr-011) and [ADR-015](decisions.md#adr-015).
+
+At a decision point, routing policy chooses one of three options:
 
 | Option | Meaning |
 | --- | --- |
 | Continue | Take the next leg of the current route toward the destination. |
-| Wait | Stay in the current hub this turn. Valid only if the current hub is safe. |
-| Reroute | Take a different route toward the destination. |
-| Divert | Because of weather, head for a nearby safe hub instead of the destination. |
+| Wait | Stay in the current hub this turn. Every hub is a safe place to wait. |
+| Reroute | Take a different available route toward the destination. |
 
 Policy compares these options using the current state. How it estimates
 delays (for example, how long a closed lane may stay closed) is not fixed yet
 ([DECISION-006](open-decisions.md#decision-006)).
 
-Weather can therefore change more than the cost or availability of the next
-lane. It can change the aircraft's immediate goal, from "reach the
-destination" to "reach safety".
+### Hubs are always safe
 
-### Weather diversion
+See [ADR-015](decisions.md#adr-015).
 
-A diversion is triggered by weather. When moving on along the planned route
-has become unsafe or impossible, an aircraft may head for a nearby suitable
-safe hub instead of only waiting or rerouting.
+Weather acts on connections and transport modes, never on hubs. An aircraft
+never has to leave a hub because the hub became unsafe.
 
 - **Only from a hub.** An aircraft in transit always finishes its committed
   leg first ([ADR-010](decisions.md#adr-010)), then decides using the weather
   it finds on arrival.
-- **Backtracking is valid.** An aircraft that flew `S → A → B` may divert
-  `B → A` if `A` is now the right safe hub. Returning to a hub because the
-  state changed is a legitimate decision. What is excluded is using a cycle
-  through other hubs as a way of waiting ([ADR-014](decisions.md#adr-014)).
-- **Waiting is not automatically safe.** "If the destination is unreachable,
-  wait" is not enough. Waiting is valid only if the current hub is safe and
-  policy chooses it.
+- **Unavailable route.** A route is unavailable when it contains a connection
+  that is unavailable under the current weather, or when it breaks a
+  routing-policy limit such as the consecutive-road budget.
+- **Route available.** If a route to the destination exists, the aircraft
+  continues or reroutes. A reroute may pass through other hubs or return to a
+  hub visited before: an aircraft that flew `S → A → B` may go back
+  `B → A` when that is now the way to the destination. What is excluded is
+  using a cycle through other hubs as a way of waiting
+  ([ADR-014](decisions.md#adr-014)).
+- **No route available.** The aircraft waits in its current hub. Moving to an
+  intermediate hub without an available route to the destination (a
+  positioning move) is deferred
+  ([DECISION-010](open-decisions.md#decision-010)).
+- **One capacity layer.** No aircraft ever needs to enter a full hub, so hub
+  capacity has no emergency overflow. The design in PR #7 proposed one; ADR-015
+  removed it ([DECISION-005](open-decisions.md#decision-005)).
 
-What makes a hub or route "unsafe", and how the target hub is chosen, is not
-defined yet ([DECISION-004](open-decisions.md#decision-004)). Today weather
-exists only on lanes.
+### Transport modes and road fallback
 
-### Emergency hub capacity
+See [ADR-016](decisions.md#adr-016) and [ADR-017](decisions.md#adr-017).
 
-A diverting aircraft may need a hub that is already full. Capacity is
-modelled in two layers ([ADR-013](decisions.md#adr-013)):
-
-```text
-normal capacity  +  weather emergency overflow
-```
-
-- **Normal capacity** (`max_drones`) is what ordinary routing and planning
-  may use. Emergency arrivals never change it: a capacity-2 hub holding
-  3 aircraft in an emergency is still a capacity-2 hub.
-- **Emergency overflow** is extra room that only qualifying weather-diversion
-  arrivals may use. Ordinary routing and planning never consume it.
-- **The amount is policy, not a constant.** `+1` may become the first default
-  if evidence supports it.
-
-Who qualifies, how long overflow lasts, and how it is released are open
-([DECISION-005](open-decisions.md#decision-005)). The hub-capacity invariant
-will need to tell overflow from a violation (see
-[Invariants and tests](#invariants-and-tests)).
+- **Topology comes from the map.** A connection is an air or road lane because
+  the map says so. Routing never infers geography from coordinates, names, or
+  distances. An island has no road because its map has no road lane.
+- **Weather never creates transport.** It can make an existing connection
+  unavailable or slower, but it cannot create a connection or a mode.
+- **Road is a fallback.** Roads stay open in any weather, so they can bridge
+  an air lane closed by a storm. Routing limits the consecutive road distance
+  of a route with `max_consecutive_road_km` (700 km by default). An air leg
+  resets it. Fallback arises from routing over the usable topology, not from
+  a special rule.
+- **One lane per pair.** An air lane and a road lane between the same pair of
+  hubs are not supported yet
+  ([DECISION-009](open-decisions.md#decision-009)).
 
 ### Routing state
 
@@ -295,9 +327,9 @@ respect to them:
 - the current `WeatherState`;
 - the current turn;
 - current occupancy and commitments: aircraft in hubs, aircraft in transit
-  and the slots they hold, and (from PR #9) live reservations;
-- the routing request: the aircraft's position and its goal (destination or
-  diversion target).
+  and the slots they hold, and (from PR #10) live reservations;
+- the routing request: the aircraft's position, its destination, and (from
+  PR #9) the road distance it has driven since its last air leg.
 
 Route search does not read `Drone` objects as hidden state, does not mutate
 the graph, does not use the global `random` module, and never talks to a
@@ -316,9 +348,9 @@ See [ADR-013](decisions.md#adr-013).
   capacity-feasible must not be rejected by the executor merely because the
   executor applies a different capacity model. This removes finding 2. It
   does not promise that a whole schedule always executes: scheduling,
-  departure, and deadlock semantics are refined in PR #9 and
+  departure, and deadlock semantics are refined in PR #10 and
   [DECISION-008](open-decisions.md#decision-008).
-- **Reservations v2 (PR #9).**
+- **Reservations v2 (PR #10).**
   - Reservations are live state, not a table built once before the first turn.
   - Each reservation belongs to an aircraft.
   - When an aircraft reroutes, its future reservations are released. Its
@@ -326,9 +358,9 @@ See [ADR-013](decisions.md#adr-013).
 - **Executor as a safety layer.** The executor keeps validating every move at
   runtime ([ADR-008](decisions.md#adr-008)), even when plans are correct.
 
-PR #8 delivers dynamic replanning without reservations v2. A rerouted or
-diverted aircraft plans against the current state only, and the executor
-keeps the run safe. Cooperative scheduling moves to the new model in PR #9.
+PR #9 delivers dynamic replanning without reservations v2. A rerouted
+aircraft plans against the current state only, and the executor keeps the
+run safe. Cooperative scheduling moves to the new model in PR #10.
 The initial cooperative planning is kept: it is what keeps the bundled maps
 within their turn budgets ([ADR-005](decisions.md#adr-005)).
 
@@ -338,9 +370,9 @@ See [ADR-014](decisions.md#adr-014).
 
 - **Waiting is staying in the current hub.** The planner must not build
   routes that leave a hub and come back only to pass time, as in finding 3.
-  Legitimate revisits after a change of state (backtracking, diversion) remain
-  allowed. When a revisit is legitimate and when it should be limited is open
-  until PR #9 ([DECISION-007](open-decisions.md#decision-007)).
+  Legitimate revisits after a change of state (backtracking) remain allowed.
+  When a revisit is legitimate and when it should be limited is open until
+  PR #10 ([DECISION-007](open-decisions.md#decision-007)).
 - **Wasted departure slots.** A distance lane's departure slot goes only to a
   move that has passed the hub-capacity check. This fixes BUG-003 variant B.
 - **Deadlock detection.** The simulator builds a wait-for graph: aircraft A
@@ -350,7 +382,7 @@ See [ADR-014](decisions.md#adr-014).
 - **Deadlock handling.** Detection comes first. A detected deadlock is
   resolved where possible, for example by replanning one aircraft of the
   cycle. If it cannot be resolved, the run stops with a clear error instead of
-  running into the 10,000-turn limit. The exact strategy is designed in PR #9.
+  running into the 10,000-turn limit. The exact strategy is designed in PR #10.
 - **Departure-slot rule.** In both variant A reproducers the swap is blocked
   by the one-departure-per-turn rule, not by lane capacity: the shared lane
   has capacity 3 in both. Whether that rule applies per lane or per direction is
@@ -368,28 +400,37 @@ WeatherProvider ──→ WeatherState ──→ Simulator / routing state
  later real weather)
 ```
 
+Implemented in PR #8.
+
 - **Provider.** The simulator asks the provider for the weather of a turn.
-  Planned providers:
+  Providers:
   - `NoWeather`;
   - `RandomWeather`, seeded, with its own `random.Random`;
   - `ScriptedWeather`, a fixed schedule for deterministic tests;
-  - later, a real-weather provider ([Part 4](#delivery-plan)).
-- **`WeatherState`** is a snapshot of the current, observed weather in the
-  project's own terms: condition and open or closed, per lane.
+  - later, a real-weather provider (after PR #11, see
+    [Delivery plan](#delivery-plan)).
+- **`WeatherState`** is a snapshot of the current, observed condition of each
+  connection, in the project's own terms.
   - It is not a forecast. Providers are not required to supply forecasts or
     expected durations, because a real-weather provider may not know how many
     turns a condition will last.
-  - Whether hubs also get weather is part of
-    [DECISION-004](open-decisions.md#decision-004).
+  - Whether a connection is open is not part of the weather. It depends on
+    the connection's transport mode and is decided by the transport rules
+    ([ADR-016](decisions.md#adr-016)).
+  - Hubs have no weather: they are always safe
+    ([ADR-015](decisions.md#adr-015)).
 - **Simulator.** It compares each turn's state with the previous one and emits
-  `WeatherChanged` events. Routing reads `WeatherState`, never the provider.
+  a `WeatherChanged` event for each connection whose condition changed. It
+  rejects a state that names a connection the map does not define. Routing
+  reads `WeatherState`, never the provider.
 - **No global `random`.** Tests never depend on the global `random` module or
   on network access. Random mode stays available for ordinary runs. This also
   removes the debt of `update_weather()` drawing from the global state even
   when no storm can start.
-- **Shared travel time.** Planner and executor will compute travel time in
-  one place. How weather and restricted hubs affect it on distance lanes stays
-  open until PR #10 ([DECISION-001](open-decisions.md#decision-001)).
+- **Shared travel time.** Planner and executor compute travel time with the
+  same transport rules. The weather penalties are provisional; how weather and
+  restricted hubs affect distance lanes stays open until PR #11
+  ([DECISION-001](open-decisions.md#decision-001)).
 
 ---
 
@@ -400,14 +441,17 @@ working from events. The new model affects it as follows:
 
 - **Committed transit** is already checked: an aircraft in transit arrives
   where it was heading.
-- **Emergency overflow** must be visible in events. The checker has to tell a
-  qualifying weather-diversion arrival from an ordinary one, so that it can
-  allow normal capacity plus overflow for the first and normal capacity for
-  everything else.
-- **Reroutes and diversions** need events of their own, so that tests can
-  observe decisions without asserting specific routes
-  ([ADR-002](decisions.md#adr-002)). How they appear in the text output is
-  PR #11 ([DECISION-003](open-decisions.md#decision-003)).
+- **Hub capacity** keeps one layer ([ADR-015](decisions.md#adr-015)), so the
+  hub-capacity invariant needs no exceptions.
+- **Closed lanes** are judged per transport mode. `WeatherChanged` carries
+  whether the connection is open, computed by the transport rules, so the
+  checker's "no departure on a closed lane" rule already follows the mode.
+- **Consecutive road distance** becomes a checkable invariant once dynamic
+  routing enforces the budget (PR #9).
+- **Reroutes** need events of their own, so that tests can observe decisions
+  without asserting specific routes ([ADR-002](decisions.md#adr-002)). How
+  they appear in the text output is PR #12
+  ([DECISION-003](open-decisions.md#decision-003)).
 - **`ScriptedWeather`** lets behavior tests close a lane on a known turn and
   check that an aircraft finds another way, without fixing which way when
   several are equally good.
@@ -418,46 +462,57 @@ working from events. The new model affects it as follows:
 
 ## Delivery plan
 
+The original PR #8 was split in two: a transport and weather foundation, and
+dynamic replanning. Later pull requests moved up by one.
+
 | PR | Scope |
 | --- | --- |
-| PR #8 | Weather provider boundary (`NoWeather`, seeded `RandomWeather`, `ScriptedWeather`). Decision points and replanning triggers. Continue, wait, and reroute. Diversion and emergency overflow only if [DECISION-004](open-decisions.md#decision-004) and [DECISION-005](open-decisions.md#decision-005) are decided first. No reservations v2. |
-| PR #9 | Reservations v2 and one capacity model for planner and executor. No artificial waiting cycles. Departure-slot fix. Deadlock detection and handling. BUG-003. [DECISION-007](open-decisions.md#decision-007), [DECISION-008](open-decisions.md#decision-008). |
-| PR #10 | Weather-aware route cost: rain, tailwind, storm and snow semantics, road and air travel. [DECISION-001](open-decisions.md#decision-001). The delay model of [DECISION-006](open-decisions.md#decision-006) if not settled in PR #8. |
-| PR #11 | Output and timeline: turns without movement, waiting, transit, reroutes, and diversions. [DECISION-003](open-decisions.md#decision-003), [BUG-004](bug-triage.md#bug-004). |
-| PR #12 | Cleanup: unused pathfinder methods and model state ([TD-001, TD-002](bug-triage.md#technical-debt)), module boundaries. |
+| PR #8 | Transport and weather foundation. Transport mode as map data, one set of transport rules, `WeatherState` with `NoWeather`, seeded `RandomWeather`, and `ScriptedWeather`. Roads stay open in storm and snow. ADR-015, ADR-016, ADR-017. No routing changes. |
+| PR #9 | Dynamic replanning. Decision points, continue, wait, and reroute, the no-progress trigger, a reroute search on the current weather, `max_consecutive_road_km` and the road distance each aircraft carries, `AgentRerouted`. The minimal routing policy ([DECISION-006](open-decisions.md#decision-006)) as a new ADR. No reservations v2. |
+| PR #10 | Reservations v2 and one capacity model for planner and executor. No artificial waiting cycles. Departure-slot fix. Deadlock detection and handling. BUG-003. [DECISION-007](open-decisions.md#decision-007), [DECISION-008](open-decisions.md#decision-008). |
+| PR #11 | Weather-aware route cost and final weather penalties. [DECISION-001](open-decisions.md#decision-001). The delay model of [DECISION-006](open-decisions.md#decision-006) if not settled in PR #9. |
+| PR #12 | Output and timeline: turns without movement, waiting, transit, and reroutes. [DECISION-003](open-decisions.md#decision-003), [BUG-004](bug-triage.md#bug-004). |
+| PR #13 | Cleanup: unused pathfinder methods and model state ([TD-001, TD-002](bug-triage.md#technical-debt)), module boundaries. |
 
-Real weather comes after PR #10, as another provider behind the same
-boundary.
+Not scheduled: parallel air and road lanes between the same hubs
+([DECISION-009](open-decisions.md#decision-009)) and positioning moves
+([DECISION-010](open-decisions.md#decision-010)). Real weather comes after
+PR #11, as another provider behind the same boundary.
+
+Accepted ADRs keep the numbers that were current when they were written. Read
+them with this mapping:
+
+| In ADR-010 to ADR-014 | Now |
+| --- | --- |
+| PR #8 (dynamic replanning, weather boundary) | PR #8 (weather boundary) and PR #9 (dynamic replanning) |
+| PR #9 (reservations v2, BUG-003) | PR #10 |
+| PR #10 (weather-aware routing) | PR #11 |
+| PR #11 (output) | PR #12 |
+| PR #12 (cleanup) | PR #13 |
 
 ---
 
 ## Open questions
 
-### Before PR #8
+### Before PR #9
 
-These need a decision before the parts of PR #8 that depend on them:
-
-- **What makes a hub or route unsafe, and how is a diversion target chosen?**
-  ([DECISION-004](open-decisions.md#decision-004)). Weather exists only on
-  lanes today. Without this answer, PR #8 can ship continue, wait, and reroute,
-  and diversion follows separately.
-- **Emergency overflow semantics** ([DECISION-005](open-decisions.md#decision-005)):
-  who qualifies, how much, for how long, and how it is released and shown.
-  Needed only if diversion is in PR #8.
-- **Minimal wait, reroute, and divert policy**
-  ([DECISION-006](open-decisions.md#decision-006)): how options are compared
-  without requiring forecasts from providers.
-- **Defaults chosen from evidence in PR #8**, not decided in advance: the
+- **Minimal routing policy**
+  ([DECISION-006](open-decisions.md#decision-006)): how continue, wait, and
+  reroute are compared without forecasts from providers.
+- **Defaults chosen from evidence in PR #9**, not decided in advance: the
   no-progress threshold, and the search limit for time-expanded route search
   (finding 5).
 
 ### Later
 
 - When a legitimate revisit is allowed or limited
-  ([DECISION-007](open-decisions.md#decision-007)), PR #9.
+  ([DECISION-007](open-decisions.md#decision-007)), PR #10.
 - Whether the one-departure-per-turn rule on distance lanes applies per lane or
-  per direction ([DECISION-008](open-decisions.md#decision-008)), PR #9.
-- Restricted hubs on distance lanes
-  ([DECISION-001](open-decisions.md#decision-001)), PR #10.
+  per direction ([DECISION-008](open-decisions.md#decision-008)), PR #10.
+- Restricted hubs on distance lanes and final weather penalties
+  ([DECISION-001](open-decisions.md#decision-001)), PR #11.
 - Turns without movement in the output
-  ([DECISION-003](open-decisions.md#decision-003)), PR #11.
+  ([DECISION-003](open-decisions.md#decision-003)), PR #12.
+- Parallel air and road lanes ([DECISION-009](open-decisions.md#decision-009))
+  and positioning moves ([DECISION-010](open-decisions.md#decision-010)),
+  not scheduled.

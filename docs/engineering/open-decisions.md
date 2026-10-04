@@ -9,16 +9,22 @@ as an ADR, and this entry is marked `DECIDED` with a link to it.
 
 Statuses: `OPEN`, `NEEDS EVIDENCE`, `DECIDED`.
 
+Target pull request numbers follow the delivery plan in
+[dynamic-routing.md](dynamic-routing.md#delivery-plan), which also maps the
+numbers used before the plan was split.
+
 | ID | Question | Status | Blocks |
 | --- | --- | --- | --- |
 | [DECISION-001](#decision-001) | Does a restricted hub add travel time on distance-based lanes? | `OPEN` | — |
 | [DECISION-002](#decision-002) | What should an aircraft do when execution diverges from its plan? | `DECIDED` | — |
 | [DECISION-003](#decision-003) | How are turns without movement represented in the output? | `OPEN` | [BUG-004](bug-triage.md#bug-004) |
-| [DECISION-004](#decision-004) | What makes a hub or route unsafe, and where does a weather diversion go? | `OPEN` | Weather diversion |
-| [DECISION-005](#decision-005) | How does weather emergency overflow work? | `OPEN` | Weather diversion |
-| [DECISION-006](#decision-006) | How does routing policy compare waiting, rerouting, and diverting? | `NEEDS EVIDENCE` | PR #8 routing policy |
-| [DECISION-007](#decision-007) | When is revisiting a hub legitimate? | `OPEN` | PR #9 |
+| [DECISION-004](#decision-004) | What makes a hub or route unsafe, and where does a weather diversion go? | `DECIDED` | — |
+| [DECISION-005](#decision-005) | How does weather emergency overflow work? | `DECIDED` (not needed) | — |
+| [DECISION-006](#decision-006) | How does routing policy compare waiting, rerouting, and diverting? | `NEEDS EVIDENCE` | PR #9 routing policy |
+| [DECISION-007](#decision-007) | When is revisiting a hub legitimate? | `OPEN` | PR #10 |
 | [DECISION-008](#decision-008) | Does the one-departure-per-turn rule apply per lane or per direction? | `OPEN` | [BUG-003](bug-triage.md#bug-003) variant A |
+| [DECISION-009](#decision-009) | Can two connections, such as air and road, join the same pair of hubs? | `OPEN` | — |
+| [DECISION-010](#decision-010) | Should an aircraft move to an intermediate hub when no route to its destination is available? | `OPEN` | — |
 
 ---
 
@@ -27,17 +33,21 @@ Statuses: `OPEN`, `NEEDS EVIDENCE`, `DECIDED`.
 ### Does a restricted hub add travel time on distance-based lanes?
 
 - **Status:** `OPEN`
-- **To be decided in:** PR #10, weather-aware routing (travel-time model). It
-  does not affect the dynamic-routing semantics of
+- **To be decided in:** PR #11, weather-aware route cost (travel-time model).
+  It does not affect the dynamic-routing semantics of
   [dynamic-routing.md](dynamic-routing.md).
+- **Since PR #8:** the transport mode is map data, and travel time comes from
+  one set of transport rules ([ADR-016](decisions.md#adr-016)). The weather
+  penalties there are provisional and are settled together with this
+  decision.
 
 **Context.** The project has two travel-time models:
 
 - **On lanes without `distance`:** entering a hub costs its movement cost.
   Restricted hubs cost 2 turns, as required by the original assignment.
-- **On lanes with `distance`:** travel time comes from the distance alone.
-  Legs under 200 km travel by road at 100 km/h, longer legs by air at
-  400 km/h, adjusted by weather.
+- **On lanes with `distance`:** travel time comes from the distance and the
+  lane's transport mode: road at 100 km/h, air at 400 km/h, adjusted by
+  weather. (Before PR #8 the mode was inferred: under 200 km meant road.)
 
 The README documents both rules, but not what happens when they meet.
 
@@ -159,7 +169,7 @@ Details are in [dynamic-routing.md](dynamic-routing.md#evidence).
 ### How are turns without movement represented in the output?
 
 - **Status:** `OPEN`
-- **To be decided in:** PR #11, simulation and output correctness, together
+- **To be decided in:** PR #12, simulation and output correctness, together
   with how waiting, reroutes, and diversions are shown.
 
 **Context.** The output format of the original assignment prints one line per
@@ -197,9 +207,28 @@ lower than the number of simulated turns (see
 
 ### What makes a hub or route unsafe, and where does a weather diversion go?
 
-- **Status:** `OPEN`
-- **Needed for:** weather diversion ([ADR-011](decisions.md#adr-011)). Without
-  it, PR #8 can ship continue, wait, and reroute, and diversion follows later.
+- **Status:** `DECIDED`
+- **Decided in:** [ADR-015](decisions.md#adr-015).
+
+In short:
+
+- Every hub is always a safe waiting location. Weather affects connections
+  and transport modes, never hub safety, so an aircraft never has to leave a
+  hub because the hub became unsafe.
+- Waiting at the current hub is always physically safe. Routing policy may
+  still prefer rerouting.
+- A route is *unavailable* when, under the current weather, it contains a
+  connection whose transport mode is unavailable, or when it breaks a
+  routing-policy limit such as the consecutive-road budget
+  ([ADR-017](decisions.md#adr-017)).
+- When a route to the destination exists, taking it is a **reroute**, even if
+  it passes through different intermediate hubs or returns to a hub visited
+  before. There is no emergency diversion from an unsafe hub.
+- When no route to the destination is available, the aircraft waits. Moving
+  to an intermediate hub in that case (a positioning move) is a separate open
+  question ([DECISION-010](#decision-010)).
+
+The text below is the question as it was recorded before the decision.
 
 **Context.** [ADR-011](decisions.md#adr-011) lets an aircraft divert to a
 nearby safe hub because of weather, and allows waiting only in a safe hub.
@@ -243,8 +272,14 @@ condition changes its travel time. No hub is ever unsafe.
 
 ### How does weather emergency overflow work?
 
-- **Status:** `OPEN`
-- **Needed for:** weather diversion. Needed in PR #8 only if diversion is.
+- **Status:** `DECIDED`: not needed
+- **Decided in:** [ADR-015](decisions.md#adr-015).
+
+Every hub is always safe, so no aircraft ever has to enter a full hub: an
+aircraft in a hub can wait, an aircraft in transit already holds its
+destination slot ([ADR-008](decisions.md#adr-008)), and start and end hubs
+have unlimited capacity. Hub capacity keeps a single layer. The text below is
+the question as it was recorded before the decision.
 
 **Context.** [ADR-013](decisions.md#adr-013) splits hub capacity into normal
 capacity and weather emergency overflow:
@@ -290,8 +325,11 @@ capacity and weather emergency overflow:
 ### How does routing policy compare waiting, rerouting, and diverting?
 
 - **Status:** `NEEDS EVIDENCE`
-- **Needed for:** routing policy in PR #8. The weather-aware cost parts may
-  move to PR #10.
+- **Needed for:** routing policy in PR #9 (dynamic replanning). The
+  weather-aware cost parts may move to PR #11.
+- **Since ADR-015:** the options are continue, wait, and reroute. Diversion
+  from an unsafe hub no longer exists, and positioning moves are
+  [DECISION-010](#decision-010).
 
 **Context.** [ADR-011](decisions.md#adr-011) requires routing policy to choose
 between continuing, waiting, rerouting, and diverting using the current state.
@@ -331,7 +369,7 @@ may not know that.
 ### When is revisiting a hub legitimate?
 
 - **Status:** `OPEN`
-- **To be decided in:** PR #9.
+- **To be decided in:** PR #10.
 
 **Context.** [ADR-014](decisions.md#adr-014) forbids cycles used as a way of
 waiting, and [ADR-011](decisions.md#adr-011) allows returning to a hub when the
@@ -371,7 +409,7 @@ state changes (backtracking, weather diversion). Between the two:
 ### Does the one-departure-per-turn rule apply per lane or per direction?
 
 - **Status:** `OPEN`
-- **To be decided in:** PR #9, with [BUG-003](bug-triage.md#bug-003).
+- **To be decided in:** PR #10, with [BUG-003](bug-triage.md#bug-003).
 
 **Context.** The executor and the planner allow one departure per turn on each
 distance lane, regardless of direction, in addition to `max_link_capacity`.
@@ -399,3 +437,69 @@ lets both leave in the same turn.
 - What the rule is meant to model (runway or takeoff separation, a single
   air corridor).
 - How each option changes turn counts on the bonus maps.
+
+---
+
+## DECISION-009
+
+### Can two connections, such as air and road, join the same pair of hubs?
+
+- **Status:** `OPEN`
+- **To be decided in:** not scheduled.
+
+**Context.** Since PR #8 each connection has one transport mode
+([ADR-016](decisions.md#adr-016)). Between two cities both a road and a
+flight can exist, and a road could then serve as a fallback for that exact
+pair when weather grounds the flight. Today the parser rejects a second
+connection between the same hubs, in either direction.
+
+**What it would change.**
+
+- **Connection identity.** The name `A-B` is the key in reservations, events,
+  weather states, the invariant checker, and the visualizers.
+- **Route representation.** A route is a list of hubs, so it does not record
+  which of two lanes it uses.
+- **Lookup.** `Graph.get_connection` returns the first lane between two hubs.
+- **Map format.** It needs a way to declare both lanes.
+
+**Possible options.**
+
+1. Keep one connection per pair (current behavior). Represent a road
+   alternative through other hubs.
+2. Allow parallel connections with distinct identities, and represent routes
+   as legs (connection plus direction).
+3. Allow one connection to offer several modes, each with its own
+   availability and travel time, and record the chosen mode per leg.
+
+**Evidence needed.**
+
+- Which bundled or planned maps need a road and a flight between the same
+  hubs (for example, road fallback on the Europe map, which has no road lanes
+  today).
+
+---
+
+## DECISION-010
+
+### Should an aircraft move to an intermediate hub when no route to its destination is available?
+
+- **Status:** `OPEN`
+- **To be decided in:** not scheduled. Needs evidence or forecasts first.
+
+**Context.** [ADR-015](decisions.md#adr-015) makes every hub a safe waiting
+location: with a route to the destination the aircraft continues or
+reroutes, and without one it waits. A positioning move would take an aircraft
+to another hub even though no route to its destination is available yet, for
+example to be closer when a lane reopens.
+
+**Why it is deferred.** Weather is a snapshot of the current state
+([ADR-012](decisions.md#adr-012)). The current state alone never shows that
+a positioning move beats waiting in a safe hub. It needs expectations about
+future conditions, such as forecast hints from a real-weather provider or
+statistics observed during the run
+([DECISION-006](#decision-006)).
+
+**Evidence needed.**
+
+- Whether positioning moves would shorten runs with weather on the bundled
+  maps, once dynamic replanning exists.
