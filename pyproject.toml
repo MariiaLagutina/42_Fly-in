@@ -5,7 +5,7 @@ description = "Turn-based air-traffic simulation with capacity-aware routing, we
 readme = "README.md"
 license = "MIT"
 authors = [{ name = "Mariia Lagutina" }]
-requires-python = ">=3.10"
+requires-python = ">=3.14"
 dependencies = [
     "pygame-ce>=2.5.8",
 ]

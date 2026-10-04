@@ -38,7 +38,7 @@ air legs, live weather, and a Pygame dispatch center.
 
 ## Quick start
 
-Requirements: Python 3.10+, [`uv`](https://docs.astral.sh/uv/), and
+Requirements: Python 3.14+, [`uv`](https://docs.astral.sh/uv/), and
 `pygame-ce` for the graphical modes (installed by `make install`).
 
 ```sh
