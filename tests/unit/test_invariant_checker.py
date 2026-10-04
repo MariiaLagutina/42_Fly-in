@@ -18,6 +18,7 @@ from graph import Graph
 from simulation import Simulator
 from tests.support.graphs import Link, build_graph, end_hub, hub, start_hub
 from tests.support.simulation import SimulationRun, check_invariants
+from transport import TransportMode
 from zone import ZoneType
 
 
@@ -169,3 +170,21 @@ def test_detects_undelivered_aircraft() -> None:
     )
 
     assert has_violation(run, "not delivered: ['D1', 'D2']")
+
+
+def test_detects_consecutive_road_over_the_budget() -> None:
+    graph = build_graph(
+        [start_hub(), hub("a"), end_hub()],
+        [
+            Link("start", "a", distance=400, mode=TransportMode.ROAD),
+            Link("a", "goal", distance=400, mode=TransportMode.ROAD),
+        ],
+    )
+    run = fake_run(graph, 1, [
+        [AgentInTransit(1, "D1", "start", "start-a", "a")],
+        [moved(2, "D1", "start", "a")],
+        [AgentInTransit(3, "D1", "a", "a-goal", "goal")],
+        [moved(4, "D1", "a", "goal")],
+    ])
+
+    assert has_violation(run, "D1 drove 800 km of consecutive road")

@@ -2,6 +2,7 @@ from connection import Connection
 from drone import Drone, DroneState
 from graph import Graph
 from pathfinder import Pathfinder
+from routing_policy import RoutingPolicy
 from transport import is_available, travel_time
 from zone import Zone
 from weather import NoWeather, WeatherProvider, WeatherState
@@ -39,6 +40,7 @@ class Simulator:
         nb_drones: int,
         dispatcher: EventDispatcher | None = None,
         weather: WeatherProvider | None = None,
+        policy: RoutingPolicy | None = None,
     ) -> None:
         self.graph = graph
         self.nb_drones = nb_drones
@@ -47,8 +49,9 @@ class Simulator:
             weather if weather is not None else NoWeather()
         )
         self.weather = WeatherState()
+        self.policy = policy if policy is not None else RoutingPolicy()
         self.drones: list[Drone] = []
-        self.pathfinder = Pathfinder(graph)
+        self.pathfinder = Pathfinder(graph, self.policy)
         self.turns: list[SimulationTurn] = []
         self._create_drones()
 
