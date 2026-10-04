@@ -2,8 +2,9 @@ from connection import Connection
 from drone import Drone, DroneState
 from graph import Graph
 from pathfinder import Pathfinder
+from transport import is_available, travel_time
 from zone import Zone
-from weather import WeatherSystem
+from weather import NoWeather, WeatherProvider, WeatherState
 from events import (
     AgentMoved,
     AgentInTransit,
@@ -12,6 +13,7 @@ from events import (
     SimulationEvent,
     TurnFinished,
     TurnStarted,
+    WeatherChanged,
 )
 
 
@@ -36,15 +38,17 @@ class Simulator:
         graph: Graph,
         nb_drones: int,
         dispatcher: EventDispatcher | None = None,
-        enable_dynamic_weather: bool = False,
+        weather: WeatherProvider | None = None,
     ) -> None:
         self.graph = graph
         self.nb_drones = nb_drones
         self.dispatcher = dispatcher
-        self.enable_dynamic_weather = enable_dynamic_weather
+        self.weather_provider: WeatherProvider = (
+            weather if weather is not None else NoWeather()
+        )
+        self.weather = WeatherState()
         self.drones: list[Drone] = []
         self.pathfinder = Pathfinder(graph)
-        self.weather_system = WeatherSystem(graph, dispatcher)
         self.turns: list[SimulationTurn] = []
         self._create_drones()
 
@@ -131,8 +135,7 @@ class Simulator:
         """
         turn = SimulationTurn(turn_number)
         self._emit(TurnStarted(turn_number))
-        if self.enable_dynamic_weather:
-            self.weather_system.update_weather(turn_number)
+        self._update_weather(turn_number)
 
         zone_occupancy = self._count_zone_occupancy()
         connection_usage = self._count_active_connection_usage()
@@ -163,6 +166,35 @@ class Simulator:
             turn_number, zone_occupancy, connection_usage
         )
         return turn
+
+    def _update_weather(self, turn_number: int) -> None:
+        """
+        Take this turn's weather from the provider and report every
+        connection whose condition changed. Weather can only describe
+        connections the map defines.
+        """
+        weather = self.weather_provider.weather_for_turn(turn_number)
+        known = {connection.name() for connection in self.graph.connections}
+        unknown = sorted(set(weather.connection_names) - known)
+        if unknown:
+            raise ValueError(
+                f"Weather refers to unknown connections: {', '.join(unknown)}"
+            )
+
+        for connection in self.graph.connections:
+            name = connection.name()
+            condition = weather.condition_of(name)
+            if condition is self.weather.condition_of(name):
+                continue
+            self._emit(
+                WeatherChanged(
+                    turn_number,
+                    name,
+                    condition.value,
+                    is_available(connection, condition),
+                )
+            )
+        self.weather = weather
 
     def _finish_in_transit_drones(
         self,
@@ -233,7 +265,9 @@ class Simulator:
             connection = self.graph.get_connection(
                 drone.current_zone, next_zone
             )
-            if connection is None or not connection.is_open:
+            if connection is None or not is_available(
+                connection, self.weather.condition_of(connection.name())
+            ):
                 continue
 
             conn_name = connection.name()
@@ -344,11 +378,11 @@ class Simulator:
             current_count = zone_occupancy.get(next_zone.name, 0)
             zone_occupancy[drone.current_zone.name] -= 1
 
-            # Pathfinder owns distance and weather travel-time rules.
-            transit_time = self.pathfinder._calculate_move_cost(
-                drone.current_zone, next_zone
-            )
             conn_name = connection.name()
+            # Travel time is fixed at departure, under the current weather.
+            transit_time = travel_time(
+                connection, next_zone, self.weather.condition_of(conn_name)
+            )
 
             if transit_time > 1:
                 origin = drone.current_zone.name

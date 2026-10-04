@@ -185,7 +185,8 @@ class Pathfinder:
         return []
 
     def _calculate_move_cost(self, current_zone: Zone, next_zone: Zone) -> int:
-        """Travel time of a step under the lane's current weather."""
+        """Travel time of a planned step. Routes are planned before any
+        weather exists, so planning uses clear weather."""
         if next_zone == current_zone:
             return 1
 
@@ -193,9 +194,7 @@ class Pathfinder:
         if not conn:
             return int(next_zone.movement_cost())
 
-        return travel_time(
-            conn, next_zone, WeatherCondition(conn.weather_condition)
-        )
+        return travel_time(conn, next_zone, WeatherCondition.CLEAR)
 
     def _is_move_valid(
         self,

@@ -7,7 +7,6 @@ better routing never breaks these tests. Routes are not asserted.
 """
 
 import random
-from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -18,6 +17,7 @@ from tests.support.simulation import (
     check_invariants,
     run_simulation,
 )
+from weather import RandomWeather
 
 MAPS_DIR = Path(__file__).resolve().parents[2] / "maps"
 MAP_FILES = sorted(MAPS_DIR.glob("*/*.txt"))
@@ -43,16 +43,17 @@ def map_id(path: Path) -> str:
     return f"{path.parent.name}/{path.name}"
 
 
-def simulate(relative_path: str, weather: bool = False) -> SimulationRun:
+def simulate(
+    relative_path: str, weather_seed: int | None = None
+) -> SimulationRun:
+    """Run a bundled map, with seeded random weather if a seed is given."""
     graph, nb_aircraft = Parser().parse(str(MAPS_DIR / relative_path))
+    weather = (
+        RandomWeather(graph, seed=weather_seed)
+        if weather_seed is not None
+        else None
+    )
     return run_simulation(graph, nb_aircraft, weather=weather)
-
-
-@pytest.fixture
-def restore_global_random() -> Iterator[None]:
-    saved_state = random.getstate()
-    yield
-    random.setstate(saved_state)
 
 
 def test_maps_are_found() -> None:
@@ -89,12 +90,24 @@ def test_simulation_without_weather_is_deterministic(map_file: Path) -> None:
 
 @pytest.mark.parametrize("seed", [0, 1, 2])
 @pytest.mark.parametrize("relative_path", WEATHER_MAPS)
-def test_weather_keeps_invariants(
-    restore_global_random: None, relative_path: str, seed: int
-) -> None:
+def test_weather_keeps_invariants(relative_path: str, seed: int) -> None:
     """Weather may delay or speed up flights but must not break any rule."""
-    random.seed(seed)
-
-    run = simulate(relative_path, weather=True)
+    run = simulate(relative_path, weather_seed=seed)
 
     assert check_invariants(run) == []
+
+
+@pytest.mark.parametrize("relative_path", WEATHER_MAPS)
+def test_seeded_weather_is_reproducible(relative_path: str) -> None:
+    first = simulate(relative_path, weather_seed=4)
+    second = simulate(relative_path, weather_seed=4)
+
+    assert first.output == second.output
+
+
+def test_weather_does_not_touch_global_random() -> None:
+    saved = random.getstate()
+
+    simulate(WEATHER_MAPS[0], weather_seed=0)
+
+    assert random.getstate() == saved

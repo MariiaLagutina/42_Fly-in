@@ -21,8 +21,6 @@ class Connection:
         self.max_link_capacity = max_link_capacity
         self.mode = mode
         self.current_drones = 0
-        self.is_open: bool = True
-        self.weather_condition: str = "clear"
         self.distance: int = 0
         self.explicit_max_link_capacity: bool = False
 
@@ -52,11 +50,3 @@ class Connection:
     def __repr__(self) -> str:
         """Return a string representation of the connection."""
         return f"Connection({self.zone_a.name}, {self.zone_b.name})"
-
-    def set_weather(self, condition: str, is_open: bool) -> None:
-        """
-        Set the weather condition and open/closed status
-        of the connection.
-        """
-        self.weather_condition = condition
-        self.is_open = is_open
