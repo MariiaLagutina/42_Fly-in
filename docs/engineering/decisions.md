@@ -19,6 +19,7 @@ Statuses: `Accepted`, `Superseded by ADR-XXX`, `Deprecated`.
 | [ADR-006](#adr-006) | Known bugs are not encoded as expected behavior in tests | Accepted |
 | [ADR-007](#adr-007) | Production bugfixes are separate from test-only pull requests | Accepted |
 | [ADR-008](#adr-008) | Hub capacity counts aircraft flying towards the hub | Accepted |
+| [ADR-009](#adr-009) | Python 3.14 is the single supported version; CI runs the local quality gates | Accepted |
 
 ---
 
@@ -283,3 +284,46 @@ never counting a departure that does not happen.
   maps this changes nothing: output is byte-for-byte identical.
 - The rule does not prevent deadlocks between aircraft waiting for each
   other ([BUG-003](bug-triage.md#bug-003)).
+
+---
+
+## ADR-009
+
+### Python 3.14 is the single supported version; CI runs the local quality gates
+
+- **Status:** Accepted
+- **Date:** 2026-10-04
+
+**Context.** The project started as a school assignment that required
+Python 3.10 compatibility. That requirement no longer applies: Maria's
+Airlanes is developed and run on Python 3.14, but `pyproject.toml` still
+declared `>=3.10`, and nothing checked the code automatically on any
+version.
+
+**Decision.**
+
+- The project moves from its historical Python 3.10 support to Python 3.14.
+- Python 3.14 is the only officially supported and tested version for now.
+- No compatibility matrix is used, on purpose.
+- CI runs the same quality gates that are available locally through the
+  Makefile (`make lint-strict` and `make test`), against the locked
+  dependencies.
+- The supported version is stated in three places that must agree:
+  `requires-python` in `pyproject.toml` declares the project's requirement,
+  `.python-version` sets the default interpreter for local tooling and uv,
+  and CI explicitly tests on Python 3.14.
+
+**Rationale.** One version keeps the setup simple and lets the code use
+current language features. Supporting older versions would cost testing and
+maintenance without serving any current user. Running the Makefile targets
+in CI means a green local `make check` and a green CI run check the same
+things.
+
+**Consequences.**
+
+- Python 3.10–3.13 are no longer supported. Backport packages that only older
+  versions needed are dropped from the lockfile.
+- Adding another supported version later is an explicit decision that
+  changes `requires-python` and adds a matrix to CI.
+- Changing the supported version means updating `pyproject.toml`,
+  `.python-version`, `uv.lock`, the CI workflow, and the README together.
