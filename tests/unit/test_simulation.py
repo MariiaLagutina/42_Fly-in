@@ -16,7 +16,11 @@ from tests.support.simulation import (
     peak_hub_occupancy,
     run_simulation,
 )
+from transport import TransportMode
 from zone import ZoneType
+
+AIR = TransportMode.AIR
+ROAD = TransportMode.ROAD
 
 
 def test_single_aircraft_on_a_linear_route() -> None:
@@ -163,31 +167,31 @@ def test_missing_route_fails_before_the_first_turn(graph: Graph) -> None:
 
 
 # --- Distance-based travel time ---------------------------------------------
-# Road legs (< 200 km) travel at 100 km/h, air legs at 400 km/h, rounded up
-# to whole turns. Rain adds one turn to road legs; a tailwind halves the
-# distance of air legs. Weather is set by hand and the random weather system
-# stays off, so these runs are deterministic.
+# Road legs travel at 100 km/h, air legs at 400 km/h, rounded up to whole
+# turns; the mode comes from the map. Rain adds one turn to road legs; a
+# tailwind halves the distance of air legs. Weather is set by hand and the
+# random weather system stays off, so these runs are deterministic.
 
 
 @pytest.mark.parametrize(
-    ("distance", "weather", "expected_turns"),
+    ("mode", "distance", "weather", "expected_turns"),
     [
-        pytest.param(100, "clear", 1, id="road-100km"),
-        pytest.param(150, "clear", 2, id="road-150km"),
-        pytest.param(199, "clear", 2, id="road-199km"),
-        pytest.param(200, "clear", 1, id="air-200km"),
-        pytest.param(450, "clear", 2, id="air-450km"),
-        pytest.param(900, "clear", 3, id="air-900km"),
-        pytest.param(150, "rain", 3, id="road-150km-rain"),
-        pytest.param(900, "tailwind", 2, id="air-900km-tailwind"),
+        pytest.param(ROAD, 100, "clear", 1, id="road-100km"),
+        pytest.param(ROAD, 150, "clear", 2, id="road-150km"),
+        pytest.param(ROAD, 250, "clear", 3, id="road-250km"),
+        pytest.param(AIR, 150, "clear", 1, id="air-150km"),
+        pytest.param(AIR, 450, "clear", 2, id="air-450km"),
+        pytest.param(AIR, 900, "clear", 3, id="air-900km"),
+        pytest.param(ROAD, 150, "rain", 3, id="road-150km-rain"),
+        pytest.param(AIR, 900, "tailwind", 2, id="air-900km-tailwind"),
     ],
 )
-def test_distance_and_weather_set_travel_time(
-    distance: int, weather: str, expected_turns: int
+def test_mode_distance_and_weather_set_travel_time(
+    mode: TransportMode, distance: int, weather: str, expected_turns: int
 ) -> None:
     graph = build_graph(
         [start_hub(), end_hub()],
-        [Link("start", "goal", distance=distance)],
+        [Link("start", "goal", distance=distance, mode=mode)],
     )
     (lane,) = graph.connections
     lane.set_weather(weather, is_open=True)

@@ -29,22 +29,22 @@ end_hub: Munich 560 690 [color=munich max_drones=10 population=1488000]
 
 # === FLIGHT ROUTES ===
 # From old start hub (Frankfurt)
-connection: Frankfurt-Mainz [distance=50km]
+connection: Frankfurt-Mainz [distance=50km mode=road]
 connection: Frankfurt-Dusseldorf [distance=200km]
 connection: Frankfurt-Stuttgart [distance=200km]
 
 # Northern routes
-connection: Hanover-Bremen [distance=120km]
-connection: Hanover-Hamburg [distance=150km]
-connection: Hamburg-Kiel [distance=95km]
-connection: Hamburg-Schwerin [distance=110km]
+connection: Hanover-Bremen [distance=120km mode=road]
+connection: Hanover-Hamburg [distance=150km mode=road]
+connection: Hamburg-Kiel [distance=95km mode=road]
+connection: Hamburg-Schwerin [distance=110km mode=road]
 connection: Schwerin-Berlin [distance=200km]
 
 # Eastern routes
-connection: Hanover-Magdeburg [distance=140km]
-connection: Magdeburg-Potsdam [distance=120km]
-connection: Potsdam-Berlin [distance=35km]
-connection: Berlin-Dresden [distance=190km]
+connection: Hanover-Magdeburg [distance=140km mode=road]
+connection: Magdeburg-Potsdam [distance=120km mode=road]
+connection: Potsdam-Berlin [distance=35km mode=road]
+connection: Berlin-Dresden [distance=190km mode=road]
 connection: Dresden-Erfurt [distance=210km]
 connection: Munich-Dresden [distance=460km]
 
@@ -66,4 +66,4 @@ connection: Hamburg-Berlin [distance=280km]
 # Central Crossroads
 connection: Hanover-Erfurt [distance=200km]
 connection: Frankfurt-Erfurt [distance=200km]
-connection: Mainz-Saarbrucken [distance=130km]
+connection: Mainz-Saarbrucken [distance=130km mode=road]

@@ -1,5 +1,7 @@
 from typing import TYPE_CHECKING
 
+from transport import TransportMode
+
 if TYPE_CHECKING:
     from zone import Zone
 
@@ -11,11 +13,13 @@ class Connection:
         zone_a: "Zone",
         zone_b: "Zone",
         max_link_capacity: int = 1,
+        mode: TransportMode = TransportMode.AIR,
     ) -> None:
         """Initialize connection configuration and state."""
         self.zone_a = zone_a
         self.zone_b = zone_b
         self.max_link_capacity = max_link_capacity
+        self.mode = mode
         self.current_drones = 0
         self.is_open: bool = True
         self.weather_condition: str = "clear"

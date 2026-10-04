@@ -1,6 +1,7 @@
 PY_FILES = main.py simulation.py pathfinder.py parser.py graph.py zone.py \
 	connection.py drone.py events.py visualizers.py pygame_standard.py \
-	pygame_airlines.py pygame_common.py weather.py config.py
+	pygame_airlines.py pygame_common.py weather.py config.py \
+	transport.py
 TEST_DIR = tests
 
 .PHONY: install hooks run run-pygame run-pygame-airlines debug lint \

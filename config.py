@@ -6,7 +6,6 @@ class SimulationConfig:
     and multipliers."""
     # Travel mechanics
     UNREACHABLE_COST: float = math.inf
-    AIR_TRAVEL_MIN_DIST: int = 200
     CAR_SPEED_KMH: float = 100.0
     AIRPLANE_SPEED_KMH: float = 400.0
 

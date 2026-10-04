@@ -5,6 +5,7 @@ from typing import TypeAlias
 from zone import Zone
 from graph import Graph
 from config import SimulationConfig
+from transport import TransportMode
 
 PathHeapItem: TypeAlias = tuple[float, int, Zone, list[Zone]]
 TimedPathHeapItem: TypeAlias = tuple[float, int, int, Zone, list[Zone]]
@@ -191,7 +192,7 @@ class Pathfinder:
         if not conn or conn.distance <= 0:
             return int(next_zone.movement_cost())
 
-        if conn.distance < SimulationConfig.AIR_TRAVEL_MIN_DIST:
+        if conn.mode is TransportMode.ROAD:
             cost = math.ceil(conn.distance / SimulationConfig.CAR_SPEED_KMH)
             if conn.weather_condition in ("storm", "snow"):
                 cost += SimulationConfig.WEATHER_PENALTY_SEVERE
