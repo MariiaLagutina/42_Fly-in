@@ -11,7 +11,8 @@ hub have freed their place; a lane is used by every aircraft that departs on
 it, crosses it, or arrives over it during the turn.
 
 Routing rules checked on top: no aircraft drives more consecutive road than
-the routing policy allows (ADR-017).
+the routing policy allows, and an aircraft only reroutes while it waits at a
+hub (ADR-010, ADR-017).
 """
 
 from dataclasses import dataclass
@@ -19,6 +20,7 @@ from dataclasses import dataclass
 from events import (
     AgentInTransit,
     AgentMoved,
+    AgentRerouted,
     EventDispatcher,
     SimulationEvent,
     TurnFinished,
@@ -143,6 +145,8 @@ class _InvariantChecker:
                     self.closed_lanes.discard(event.connection_name)
                 else:
                     self.closed_lanes.add(event.connection_name)
+            elif isinstance(event, AgentRerouted):
+                self._reroute(event)
             elif isinstance(event, AgentInTransit):
                 self._depart(event)
             elif isinstance(event, AgentMoved):
@@ -271,6 +275,20 @@ class _InvariantChecker:
         if self.road_km[label] > self.max_road_km:
             self.fail(f"{label} drove {self.road_km[label]} km of "
                       f"consecutive road, limit {self.max_road_km}")
+
+    def _reroute(self, event: AgentRerouted) -> None:
+        label = event.agent_label
+        position = self.positions.get(label)
+        if position is None:
+            self.fail(f"unknown aircraft {label} rerouted")
+        elif isinstance(position, _InTransit):
+            self.fail(f"{label} rerouted while in transit")
+        elif position != event.hub:
+            self.fail(f"{label} rerouted at {event.hub} but was at "
+                      f"{position}")
+        if not event.route or event.route[-1] != self.end_name:
+            self.fail(f"{label} rerouted to a route that does not end at "
+                      f"{self.end_name}")
 
     def _check_capacities(self) -> None:
         occupancy: dict[str, int] = {}

@@ -9,6 +9,7 @@ from drone import DroneState
 from events import (
     AgentInTransit,
     AgentMoved,
+    AgentRerouted,
     SimulationEvent,
     TurnFinished,
     TurnStarted,
@@ -188,3 +189,38 @@ def test_detects_consecutive_road_over_the_budget() -> None:
     ])
 
     assert has_violation(run, "D1 drove 800 km of consecutive road")
+
+
+def test_accepts_a_reroute_at_the_current_hub() -> None:
+    run = fake_run(make_graph(), 1, [
+        [
+            AgentRerouted(1, "D1", "start", ("gate", "goal")),
+            moved(1, "D1", "start", "gate"),
+        ],
+        [moved(2, "D1", "gate", "goal")],
+    ])
+
+    assert check_invariants(run) == []
+
+
+def test_detects_a_reroute_in_transit() -> None:
+    run = fake_run(make_graph(), 1, [
+        [
+            AgentInTransit(1, "D1", "start", "start-slow", "slow"),
+            AgentRerouted(1, "D1", "start", ("gate", "goal")),
+        ],
+        [moved(2, "D1", "start", "slow")],
+        [moved(3, "D1", "slow", "goal")],
+    ])
+
+    assert has_violation(run, "D1 rerouted while in transit")
+
+
+def test_detects_a_reroute_away_from_the_current_hub() -> None:
+    run = fake_run(make_graph(), 1, [
+        [AgentRerouted(1, "D1", "gate", ("goal",))],
+        [moved(2, "D1", "start", "gate")],
+        [moved(3, "D1", "gate", "goal")],
+    ])
+
+    assert has_violation(run, "D1 rerouted at gate but was at start")

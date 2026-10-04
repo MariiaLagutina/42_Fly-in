@@ -26,6 +26,17 @@ class AgentInTransit:
 
 
 @dataclass(frozen=True)
+class AgentRerouted:
+    """An aircraft at `hub` replaced its remaining route with `route`, the
+    hubs it now plans to visit up to its destination."""
+
+    turn_number: int
+    agent_label: str
+    hub: str
+    route: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class TurnFinished:
     turn_number: int
     movements: tuple[tuple[str, str], ...]
@@ -50,6 +61,7 @@ SimulationEvent = (
     TurnStarted
     | AgentMoved
     | AgentInTransit
+    | AgentRerouted
     | TurnFinished
     | CapacitySnapshot
     | WeatherChanged

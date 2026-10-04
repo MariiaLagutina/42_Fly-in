@@ -9,7 +9,7 @@ distance travel-time formula leave no room for another valid answer.
 
 import pytest
 
-from events import AgentInTransit, WeatherChanged
+from events import AgentInTransit, AgentRerouted, WeatherChanged
 from graph import Graph
 from tests.support.graphs import Link, build_graph, end_hub, hub, start_hub
 from tests.support.simulation import (
@@ -273,6 +273,175 @@ def test_weather_cannot_describe_a_connection_the_map_lacks() -> None:
 
     with pytest.raises(ValueError):
         run_simulation(graph, 1, weather)
+
+
+# --- Dynamic replanning (ADR-018) -------------------------------------------
+# An aircraft at a hub keeps its route while it is usable, reroutes when the
+# weather makes it unusable, and waits when no route is available. Weather
+# comes from `ScriptedWeather`. Routes are asserted only where a single
+# alternative exists.
+
+STORM = WeatherCondition.STORM
+CLEAR = WeatherCondition.CLEAR
+
+
+def reroutes(run: SimulationRun) -> list[AgentRerouted]:
+    return [e for e in run.events if isinstance(e, AgentRerouted)]
+
+
+def two_air_routes(
+    via_a: int = 450, via_b: int = 900
+) -> Graph:
+    """start -> a -> goal is faster than start -> b -> goal."""
+    return build_graph(
+        [start_hub(), hub("a"), hub("b"), end_hub()],
+        [
+            Link("start", "a", distance=via_a),
+            Link("a", "goal", distance=via_a),
+            Link("start", "b", distance=via_b),
+            Link("b", "goal", distance=via_b),
+        ],
+    )
+
+
+def test_closed_first_leg_on_turn_one_causes_a_reroute() -> None:
+    weather = ScriptedWeather({1: {"start-a": STORM}})
+
+    run = run_simulation(two_air_routes(), 1, weather)
+
+    assert check_invariants(run) == []
+    assert reroutes(run) == [AgentRerouted(1, "D1", "start", ("b", "goal"))]
+    assert departure_turns(run)[0] == 1
+
+
+def test_aircraft_waits_while_no_route_is_usable() -> None:
+    weather = ScriptedWeather({
+        1: {"start-a": STORM, "start-b": STORM},
+        4: {"start-a": CLEAR, "start-b": CLEAR},
+    })
+
+    run = run_simulation(two_air_routes(), 1, weather)
+
+    assert check_invariants(run) == []
+    assert reroutes(run) == []
+    assert departure_turns(run)[0] == 4
+    assert run.visited_zones("D1") == ["a", "goal"]
+
+
+def test_unusable_later_leg_causes_a_reroute_before_departure() -> None:
+    weather = ScriptedWeather({1: {"a-goal": STORM}})
+
+    run = run_simulation(two_air_routes(), 1, weather)
+
+    assert check_invariants(run) == []
+    assert reroutes(run) == [AgentRerouted(1, "D1", "start", ("b", "goal"))]
+
+
+def test_aircraft_in_transit_finishes_its_leg_before_rerouting() -> None:
+    """The lane ahead closes while the aircraft flies to `a`. It decides at
+    `a`, on the first turn after it arrives there (turn 3)."""
+    weather = ScriptedWeather({2: {"a-goal": STORM}})
+
+    run = run_simulation(two_air_routes(), 1, weather)
+
+    assert check_invariants(run) == []
+    first = reroutes(run)[0]
+    assert (first.turn_number, first.hub) == (3, "a")
+    assert "a-goal" not in {
+        e.connection for e in run.events if isinstance(e, AgentInTransit)
+    }
+
+
+def test_usable_route_is_kept_when_another_becomes_faster() -> None:
+    """A tailwind makes the route via `b` faster than the planned one, but
+    the planned route is still usable, so the aircraft keeps it."""
+    graph = two_air_routes(via_a=1200, via_b=1600)
+    weather = ScriptedWeather({1: {
+        "start-b": WeatherCondition.TAILWIND,
+        "b-goal": WeatherCondition.TAILWIND,
+    }})
+
+    run = run_simulation(graph, 1, weather)
+
+    assert check_invariants(run) == []
+    assert reroutes(run) == []
+    assert run.visited_zones("D1") == ["a", "goal"]
+
+
+def air_with_road_fallback(road_km: int) -> Graph:
+    """A direct air lane and a two-leg road through `r`."""
+    return build_graph(
+        [start_hub(), hub("r"), end_hub()],
+        [
+            Link("start", "goal", distance=450),
+            Link("start", "r", distance=road_km, mode=ROAD),
+            Link("r", "goal", distance=road_km, mode=ROAD),
+        ],
+    )
+
+
+def test_road_becomes_the_fallback_when_air_closes() -> None:
+    weather = ScriptedWeather({1: {"start-goal": STORM}})
+
+    run = run_simulation(air_with_road_fallback(150), 1, weather)
+
+    assert check_invariants(run) == []
+    assert reroutes(run) == [AgentRerouted(1, "D1", "start", ("r", "goal"))]
+
+
+def test_road_over_the_budget_is_not_a_fallback() -> None:
+    """400 + 400 km of road exceeds the 700 km budget, so the aircraft
+    waits for the air lane instead."""
+    weather = ScriptedWeather({
+        1: {"start-goal": STORM}, 3: {"start-goal": CLEAR},
+    })
+
+    run = run_simulation(air_with_road_fallback(400), 1, weather)
+
+    assert check_invariants(run) == []
+    assert reroutes(run) == []
+    assert departure_turns(run) == [3]
+
+
+def test_road_already_driven_counts_when_rerouting() -> None:
+    """After 500 km of road to `x`, the 300 km road detour would make 800 km
+    of consecutive road, so the aircraft waits for the air lane."""
+    graph = build_graph(
+        [start_hub(), hub("x"), hub("y"), end_hub()],
+        [
+            Link("start", "x", distance=500, mode=ROAD),
+            Link("x", "goal", distance=450),
+            Link("x", "y", distance=300, mode=ROAD),
+            Link("y", "goal", distance=450),
+        ],
+    )
+    weather = ScriptedWeather({2: {"x-goal": STORM}, 9: {"x-goal": CLEAR}})
+
+    run = run_simulation(graph, 1, weather)
+
+    assert check_invariants(run) == []
+    assert departure_turns(run)[0] == 1
+    assert reroutes(run) == []
+    assert run.visited_zones("D1") == ["x", "goal"]
+
+
+def test_fresh_road_budget_allows_the_same_detour() -> None:
+    """Control for the test above: starting at `x` with no road driven,
+    the same detour is within the budget and is taken."""
+    graph = build_graph(
+        [start_hub("x"), hub("y"), end_hub()],
+        [
+            Link("x", "goal", distance=450),
+            Link("x", "y", distance=300, mode=ROAD),
+            Link("y", "goal", distance=450),
+        ],
+    )
+    weather = ScriptedWeather({1: {"x-goal": STORM}})
+
+    run = run_simulation(graph, 1, weather)
+
+    assert check_invariants(run) == []
+    assert reroutes(run) == [AgentRerouted(1, "D1", "x", ("y", "goal"))]
 
 
 # --- Regression: hub capacity (BUG-001, BUG-002) ----------------------------

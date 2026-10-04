@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from events import AgentRerouted
 from parser import Parser
 from tests.support.simulation import (
     SimulationRun,
@@ -66,9 +67,12 @@ def test_every_budgeted_map_exists() -> None:
 
 @pytest.mark.parametrize("map_file", MAP_FILES, ids=map_id)
 def test_map_is_delivered_without_violations(map_file: Path) -> None:
+    """Without weather, every planned route stays usable, so no aircraft
+    reroutes."""
     run = simulate(map_id(map_file))
 
     assert check_invariants(run) == []
+    assert not any(isinstance(e, AgentRerouted) for e in run.events)
 
 
 @pytest.mark.parametrize(
