@@ -1,20 +1,32 @@
 import random
+from enum import Enum
+from typing import TYPE_CHECKING
 
-from connection import Connection
 from events import EventDispatcher, WeatherChanged
-from graph import Graph
+
+if TYPE_CHECKING:
+    from connection import Connection
+    from graph import Graph
+
+
+class WeatherCondition(Enum):
+    CLEAR = "clear"
+    RAIN = "rain"
+    SNOW = "snow"
+    STORM = "storm"
+    TAILWIND = "tailwind"
 
 
 class WeatherSystem:
     """Manages dynamic weather conditions affecting connections."""
     def __init__(
         self,
-        graph: Graph,
+        graph: "Graph",
         dispatcher: EventDispatcher | None = None,
     ) -> None:
         self.graph = graph
         self.dispatcher = dispatcher
-        self.active_storms: list[Connection] = []
+        self.active_storms: list["Connection"] = []
         self.storm_chance = 0.05  # 5% chance per connection each turn
 
     def update_weather(self, turn_number: int) -> None:
@@ -42,7 +54,7 @@ class WeatherSystem:
                 self.active_storms.append(conn)
                 self._emit_weather(turn_number, conn)
 
-    def _emit_weather(self, turn_number: int, conn: Connection) -> None:
+    def _emit_weather(self, turn_number: int, conn: "Connection") -> None:
         """Emit a WeatherChanged event if a dispatcher is available."""
         if self.dispatcher:
             self.dispatcher.dispatch(

@@ -5,7 +5,8 @@ from typing import TypeAlias
 from zone import Zone
 from graph import Graph
 from config import SimulationConfig
-from transport import TransportMode
+from transport import travel_time
+from weather import WeatherCondition
 
 PathHeapItem: TypeAlias = tuple[float, int, Zone, list[Zone]]
 TimedPathHeapItem: TypeAlias = tuple[float, int, int, Zone, list[Zone]]
@@ -184,28 +185,17 @@ class Pathfinder:
         return []
 
     def _calculate_move_cost(self, current_zone: Zone, next_zone: Zone) -> int:
-        """Calculates travel time based on distance and weather."""
+        """Travel time of a step under the lane's current weather."""
         if next_zone == current_zone:
             return 1
 
         conn = self.graph.get_connection(current_zone, next_zone)
-        if not conn or conn.distance <= 0:
+        if not conn:
             return int(next_zone.movement_cost())
 
-        if conn.mode is TransportMode.ROAD:
-            cost = math.ceil(conn.distance / SimulationConfig.CAR_SPEED_KMH)
-            if conn.weather_condition in ("storm", "snow"):
-                cost += SimulationConfig.WEATHER_PENALTY_SEVERE
-            elif conn.weather_condition == "rain":
-                cost += SimulationConfig.WEATHER_PENALTY_MILD
-            return max(1, cost)
-
-        eff_dist = float(conn.distance)
-        if conn.weather_condition == "tailwind":
-            eff_dist /= SimulationConfig.TAILWIND_DIST_DIVISOR
-
-        cost = math.ceil(eff_dist / SimulationConfig.AIRPLANE_SPEED_KMH)
-        return max(1, cost)
+        return travel_time(
+            conn, next_zone, WeatherCondition(conn.weather_condition)
+        )
 
     def _is_move_valid(
         self,
