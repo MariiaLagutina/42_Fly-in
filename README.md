@@ -83,7 +83,8 @@ D2-goal
 ## How routing works
 
 Aircraft are planned one after another with a cooperative, Dijkstra-style
-best-first search over `(hub, turn)` states. While a route is being built, the planner reads and
+best-first search over `(hub, turn)` states, which also track the consecutive
+road distance driven. While a route is being built, the planner reads and
 updates shared reservation tables:
 
 - hub occupancy at each turn
@@ -106,8 +107,26 @@ global optimum. In exchange the planner is fast, explainable, and produces
 compact schedules on all included maps.
 
 During execution, the simulator runs each turn in phases: aircraft finishing
-a leg arrive first, then departures are planned from a stable snapshot, and
-only moves that pass the capacity checks are applied.
+a leg arrive first, then aircraft at hubs check their routes, departures are
+planned from a stable snapshot, and only moves that pass the capacity checks
+are applied.
+
+### Rerouting
+
+Each turn, an aircraft waiting at a hub checks whether every remaining leg of
+its route is still available under the current weather. If one is not, it
+looks for the fastest route that is available now and takes it; if there is
+none, it waits in the hub, which is always safe, and continues once the
+weather clears. A route that is still usable is kept even if another one has
+become faster, and an aircraft in the middle of a leg always finishes it.
+Rerouting ignores other aircraft; the capacity checks above still apply.
+
+### Road budget
+
+Roads are a fallback, not the main way to travel: no route may contain more
+than 700 km of consecutive road legs. An air leg resets the count. The limit
+applies to the initial plan and to every reroute, and a map whose only route
+breaks it fails before the first turn.
 
 ## Road and air legs
 
@@ -144,9 +163,10 @@ Weather never creates a lane or changes its distance. The extra turns are
 provisional and may change when the travel-time model is settled. Every hub
 is always a safe place to wait.
 
-Routes are planned before the first turn and are not re-planned when the
-weather changes. Weather affects whether a leg can start and how long it
-takes once started. Weather is random and not seeded, so two runs of the same
+Routes are planned before the first turn in clear weather. When the weather
+makes a route unusable, the aircraft reroutes or waits (see
+[Rerouting](#rerouting)). Weather affects whether a leg can start and how
+long it takes once started. Weather is random and not seeded, so two runs of the same
 map can differ.
 
 ## Aviation dispatch center
@@ -237,7 +257,8 @@ map file → Parser → Graph (hubs, lanes)
 | `parser.py` | Reads map files into a `Graph`, reports `ParseError` |
 | `graph.py`, `zone.py`, `connection.py` | Hubs, lanes, and their capacities |
 | `drone.py` | State of a single aircraft (waiting, in transit, delivered) |
-| `pathfinder.py` | Cooperative space-time search and move costs |
+| `pathfinder.py` | Cooperative space-time search, reroute search, and move costs |
+| `routing_policy.py` | Routing limits, such as the consecutive-road budget |
 | `simulation.py` | Turn execution and capacity checks |
 | `weather.py` | Weather providers (none, seeded random, scripted) and the weather state |
 | `transport.py` | Transport modes and how weather affects their availability and travel time |

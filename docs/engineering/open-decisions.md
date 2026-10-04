@@ -20,7 +20,7 @@ numbers used before the plan was split.
 | [DECISION-003](#decision-003) | How are turns without movement represented in the output? | `OPEN` | [BUG-004](bug-triage.md#bug-004) |
 | [DECISION-004](#decision-004) | What makes a hub or route unsafe, and where does a weather diversion go? | `DECIDED` | — |
 | [DECISION-005](#decision-005) | How does weather emergency overflow work? | `DECIDED` (not needed) | — |
-| [DECISION-006](#decision-006) | How does routing policy compare waiting, rerouting, and diverting? | `NEEDS EVIDENCE` | PR #9 routing policy |
+| [DECISION-006](#decision-006) | How does routing policy compare waiting, rerouting, and diverting? | `DECIDED` (minimal policy) | — |
 | [DECISION-007](#decision-007) | When is revisiting a hub legitimate? | `OPEN` | PR #10 |
 | [DECISION-008](#decision-008) | Does the one-departure-per-turn rule apply per lane or per direction? | `OPEN` | [BUG-003](bug-triage.md#bug-003) variant A |
 | [DECISION-009](#decision-009) | Can two connections, such as air and road, join the same pair of hubs? | `OPEN` | — |
@@ -324,12 +324,25 @@ capacity and weather emergency overflow:
 
 ### How does routing policy compare waiting, rerouting, and diverting?
 
-- **Status:** `NEEDS EVIDENCE`
-- **Needed for:** routing policy in PR #9 (dynamic replanning). The
-  weather-aware cost parts may move to PR #11.
-- **Since ADR-015:** the options are continue, wait, and reroute. Diversion
-  from an unsafe hub no longer exists, and positioning moves are
-  [DECISION-010](#decision-010).
+- **Status:** `DECIDED` (minimal policy)
+- **Decided in:** [ADR-018](decisions.md#adr-018), PR #9.
+
+In short:
+
+- An aircraft at a hub keeps its route while every remaining leg is
+  available. It searches for a new route only when the weather makes a leg
+  unavailable; it takes the route found, or waits and keeps its old route if
+  there is none.
+- No delay estimate is needed: a usable route is never compared with
+  alternatives, and an unusable one is replaced by whatever route is
+  available now.
+- **Still open:** a trigger for aircraft that make no progress because of
+  capacity moves to PR #10, together with deadlock handling. Whether route
+  cost should weigh the current weather beyond availability (for example,
+  preferring a route without rain) is part of PR #11
+  ([DECISION-001](#decision-001)).
+
+The text below is the question as it was recorded before the decision.
 
 **Context.** [ADR-011](decisions.md#adr-011) requires routing policy to choose
 between continuing, waiting, rerouting, and diverting using the current state.

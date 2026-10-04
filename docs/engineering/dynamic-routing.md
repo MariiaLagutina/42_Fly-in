@@ -81,6 +81,50 @@ every turn: WeatherSystem.update_weather (global random)
   clear weather. Without weather, every bundled map produces exactly the same
   output as before.
 
+### Since PR #9
+
+- **Rerouting.** Each turn, an aircraft waiting at a hub checks its remaining
+  route. If the weather makes a leg unavailable, it takes the fastest route
+  available now, or waits and keeps its route if there is none
+  ([ADR-018](decisions.md#adr-018)). A usable route is never replaced.
+- **Road budget.** `RoutingPolicy.max_consecutive_road_km` (700 km) applies
+  to the initial plan, to every reroute, and to the aircraft's road distance
+  carried across reroutes. Search states include the consecutive road
+  distance, with dominance pruning.
+- **Unchanged.** Without weather, no route becomes unusable and the budget
+  changes no bundled plan: every bundled map produces exactly the same
+  output as before.
+
+Evidence for the trigger, measured with a throwaway prototype of the
+decision layer (30 seeds per map, seeded `RandomWeather`), as mean turns:
+
+| Map | Without rerouting | Next leg closed | Any remaining leg closed | Fastest route every turn |
+| --- | ---: | ---: | ---: | ---: |
+| challenger | 91.1 | 362.1 | 95.8 | 93.7 |
+| hard/maze_nightmare | 26.0 | 31.3 | 18.2 | 17.9 |
+| hard/capacity_hell | 27.4 | 30.5 | 24.5 | 24.1 |
+| hard/ultimate_challenge | 46.4 | 57.8 | 46.8 | 44.1 |
+| medium/priority_puzzle | 10.5 | 17.6 | 10.0 | 9.8 |
+| bonus/germany | 17.6 | 15.2 | 16.1 | 15.6 |
+| bonus/europa | 45.9 | 43.9 | 46.9 | 49.9 |
+
+- Searching only when the next leg closes brings aircraft up to the closed
+  lane and jams them there.
+- Recomputing the fastest route every turn produced 1,421 A-B-A route
+  switches (against 243 weather-driven ones) and changed seven maps even
+  without weather.
+- A no-progress trigger (three turns) changed turn counts by less than two
+  turns either way, but resolved every BUG-003 deadlock, so it moved to
+  PR #10 with deadlock handling.
+- No variant broke an invariant or hit the turn limit.
+
+The implementation reproduces the chosen variant exactly: over the same
+360 seeded runs it made 6,157 reroutes, with no invariant violations and no
+failed runs; 200 of the 360 runs end on the same turn as before.
+The larger maps lose some coordination, because a rerouted aircraft drops
+its planned waits and ignores other aircraft: challenger +4.7 turns,
+Europe +1.0. Reservations v2 (PR #10) addresses that.
+
 ---
 
 ## Evidence
@@ -251,9 +295,10 @@ Two different things happen at a hub:
   - the aircraft has waited without progress for a number of consecutive
     turns that reaches a configurable threshold.
 
-A full route search does not run on every turn. The threshold is an explicit,
-configurable routing-policy parameter. Its default is chosen in PR #9 from
-evidence.
+A full route search does not run on every turn. PR #9 implements the first
+trigger ([ADR-018](decisions.md#adr-018)). The no-progress trigger moved to
+PR #10: waiting for capacity is a scheduling problem, and in the PR #9
+prototype that trigger resolved every BUG-003 deadlock.
 
 ### Routing options
 
@@ -446,8 +491,11 @@ working from events. The new model affects it as follows:
 - **Closed lanes** are judged per transport mode. `WeatherChanged` carries
   whether the connection is open, computed by the transport rules, so the
   checker's "no departure on a closed lane" rule already follows the mode.
-- **Consecutive road distance** becomes a checkable invariant once dynamic
-  routing enforces the budget (PR #9).
+- **Consecutive road distance** is checked from movement events: no aircraft
+  drives more consecutive road than the routing policy allows (PR #9).
+- **Reroutes happen only at hubs.** An `AgentRerouted` event must name the
+  hub the aircraft is in, never an aircraft in transit, and its route must
+  end at the destination (PR #9).
 - **Reroutes** need events of their own, so that tests can observe decisions
   without asserting specific routes ([ADR-002](decisions.md#adr-002)). How
   they appear in the text output is PR #12
@@ -468,9 +516,9 @@ dynamic replanning. Later pull requests moved up by one.
 | PR | Scope |
 | --- | --- |
 | PR #8 | Transport and weather foundation. Transport mode as map data, one set of transport rules, `WeatherState` with `NoWeather`, seeded `RandomWeather`, and `ScriptedWeather`. Roads stay open in storm and snow. ADR-015, ADR-016, ADR-017. No routing changes. |
-| PR #9 | Dynamic replanning. Decision points, continue, wait, and reroute, the no-progress trigger, a reroute search on the current weather, `max_consecutive_road_km` and the road distance each aircraft carries, `AgentRerouted`. The minimal routing policy ([DECISION-006](open-decisions.md#decision-006)) as a new ADR. No reservations v2. |
-| PR #10 | Reservations v2 and one capacity model for planner and executor. No artificial waiting cycles. Departure-slot fix. Deadlock detection and handling. BUG-003. [DECISION-007](open-decisions.md#decision-007), [DECISION-008](open-decisions.md#decision-008). |
-| PR #11 | Weather-aware route cost and final weather penalties. [DECISION-001](open-decisions.md#decision-001). The delay model of [DECISION-006](open-decisions.md#decision-006) if not settled in PR #9. |
+| PR #9 | Dynamic replanning. Decision points, continue, wait, and reroute when the weather makes a route unusable, a reroute search on the current weather, `RoutingPolicy.max_consecutive_road_km` in every route search, the road distance each aircraft carries, `AgentRerouted`. ADR-018. No reservations v2. |
+| PR #10 | Reservations v2 and one capacity model for planner and executor. No artificial waiting cycles. Departure-slot fix. The no-progress trigger. Deadlock detection and handling. BUG-003. [DECISION-007](open-decisions.md#decision-007), [DECISION-008](open-decisions.md#decision-008). |
+| PR #11 | Weather-aware route cost and final weather penalties. [DECISION-001](open-decisions.md#decision-001). |
 | PR #12 | Output and timeline: turns without movement, waiting, transit, and reroutes. [DECISION-003](open-decisions.md#decision-003), [BUG-004](bug-triage.md#bug-004). |
 | PR #13 | Cleanup: unused pathfinder methods and model state ([TD-001, TD-002](bug-triage.md#technical-debt)), module boundaries. |
 
@@ -494,14 +542,11 @@ them with this mapping:
 
 ## Open questions
 
-### Before PR #9
+### Before PR #10
 
-- **Minimal routing policy**
-  ([DECISION-006](open-decisions.md#decision-006)): how continue, wait, and
-  reroute are compared without forecasts from providers.
-- **Defaults chosen from evidence in PR #9**, not decided in advance: the
-  no-progress threshold, and the search limit for time-expanded route search
-  (finding 5).
+- **No-progress trigger:** what counts as progress and the threshold,
+  decided with deadlock handling. Progress is a departure or an arrival;
+  turns in transit and planned waits do not count.
 
 ### Later
 
