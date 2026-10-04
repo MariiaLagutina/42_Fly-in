@@ -199,6 +199,12 @@ confirmed:
   ([ADR-016](decisions.md#adr-016)). Lanes that were road under the old
   "under 200 km" rule are marked `mode=road` in the reproducers below, so
   they keep their original meaning. All four were re-verified after PR #8.
+- **Since PR #9 the canonical reproducers are the two without weather.**
+  They still hang. The two weather reproducers now finish (after 157 and
+  116 turns): the aircraft stay blocked for more than a hundred turns until
+  weather closes a lane on a blocked route and one aircraft reroutes
+  ([ADR-018](decisions.md#adr-018)). Rerouting escapes these cases by
+  chance; the root cause below is unchanged.
 
 **Reproducers without weather.** These are deterministic. Save one as
 `repro.txt` and run `uv run --locked python3 main.py repro.txt`. The run ends
@@ -246,8 +252,8 @@ connection: E-S [distance=700km]
 connection: S-h0 [max_link_capacity=3 distance=450km]
 ```
 
-**Reproducers with weather.** To reproduce, save a map as `repro.txt` and run
-it with its seed:
+**Reproducers with weather (historical).** Before PR #9 these hung. To run
+them, save a map as `repro.txt` and run it with its seed:
 
 ```python
 from parser import Parser
@@ -257,7 +263,7 @@ from weather import RandomWeather
 graph, nb_aircraft = Parser().parse("repro.txt")
 weather = RandomWeather(graph, seed=SEED)  # 2287 for A, 5953 for B
 Simulator(graph, nb_aircraft, weather=weather).run()
-# RuntimeError: Simulation exceeded 10000 turns.
+# Before PR #9: RuntimeError: Simulation exceeded 10000 turns.
 ```
 
 `RandomWeather` draws in the same order as the earlier global-`random`
@@ -407,8 +413,10 @@ simulation. It is recorded so it can be removed or used deliberately later.
 
 - `Pathfinder.find_path_dijkstra`, `Pathfinder.find_multiple_paths`,
   `Pathfinder._pathfinding_cost`, and `Pathfinder.heuristic` are not called by
-  the simulation. The route planner is `find_cooperative_path`;
-  `find_path_bfs` is used only as a reachability check.
+  the simulation. The route planner is `find_cooperative_path`, and
+  `find_route` handles reroutes and the reachability check. Since PR #9,
+  `find_path_bfs` is not called either: the reachability check has to
+  respect the consecutive-road budget, which it does not.
 - `Simulator._path_cost`, `Simulator.print_results`, and
   `Simulator.print_stats` are not called.
 - `SimulationConfig.UNREACHABLE_COST`, `RESERVATION_PENALTY_WEIGHT`, and

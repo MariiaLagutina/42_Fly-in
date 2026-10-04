@@ -20,6 +20,8 @@ class Drone:
         self.transit_turns_left: int = 0
         self.transit_target: Optional[Zone] = None
         self.transit_connection_name: Optional[str] = None
+        # Consecutive road distance since the last air leg (ADR-017).
+        self.road_km_since_air: int = 0
 
     @property
     def label(self) -> str:

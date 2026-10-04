@@ -30,6 +30,7 @@ text; the superseding ADR states what it replaces.
 | [ADR-015](#adr-015) | Every hub is a safe waiting location; hub capacity has one layer | Accepted |
 | [ADR-016](#adr-016) | Transport mode is map data; weather acts through one set of transport rules | Accepted |
 | [ADR-017](#adr-017) | Road is a fallback with a consecutive-road budget | Accepted |
+| [ADR-018](#adr-018) | Aircraft reroute only when weather makes their route unusable | Accepted |
 
 ---
 
@@ -808,3 +809,76 @@ up to a long drive.
   part of its state, and an aircraft carries it across replanning.
 - Until PR #9, routes are not checked against the budget. On the bundled
   maps, planned routes use at most 245 km of consecutive road.
+
+---
+
+## ADR-018
+
+### Aircraft reroute only when weather makes their route unusable
+
+- **Status:** Accepted
+- **Date:** 2026-10-04
+
+**Context.** [ADR-011](#adr-011) separates decision points from replanning
+triggers and leaves the comparison of options to a routing policy
+([DECISION-006](open-decisions.md#decision-006)). Weather providers give no
+forecasts ([ADR-012](#adr-012)), and every hub is a safe place to wait
+([ADR-015](#adr-015)). A prototype on all bundled maps (30 seeds each, see
+[dynamic-routing.md](dynamic-routing.md#since-pr-9)) compared:
+
+- searching when only the next leg is unavailable;
+- searching when any leg of the remaining route is unavailable;
+- recomputing the fastest route on every turn.
+
+**Decision.**
+
+- **Decision point.** Every turn, each aircraft waiting at a hub checks its
+  remaining route. Planned waits are not legs. Aircraft in transit are not
+  considered ([ADR-010](#adr-010)).
+- **Trigger.** A route search runs only when a leg of the remaining route is
+  unavailable under the current weather. Routes are always planned within
+  the consecutive-road budget from the aircraft's current road distance, so
+  only weather can make them unusable.
+- **Reroute.** If a route to the destination is available, the aircraft
+  takes it. The route is the fastest under the current weather, ignores
+  other aircraft, never visits a hub twice, and respects the road budget.
+  An `AgentRerouted` event records the hub and the new route.
+- **Wait.** If no route is available, the aircraft waits and keeps its old
+  route, which it continues as soon as the weather allows.
+- **No comparison while usable.** A usable route is kept even if another
+  route has become faster. There is no periodic re-optimization and no
+  hysteresis setting.
+- **Road budget everywhere.** The initial cooperative plan, the route search,
+  and the executor all follow `RoutingPolicy.max_consecutive_road_km`
+  ([ADR-017](#adr-017)). A map whose only route breaks the budget fails
+  before the first turn.
+- **Search state.** A search state includes the consecutive road distance.
+  A partial route is dropped only when another one reached the same state
+  (hub, or hub and turn) with no higher cost and no more road.
+- **Deferred to PR #10.** A trigger for aircraft that make no progress
+  because of capacity. In the prototype it resolved every BUG-003 deadlock,
+  so it belongs with deadlock handling.
+
+**Rationale.**
+
+- Searching on any unusable leg reroutes before an aircraft flies into a
+  dead end. Searching only on the next leg brought aircraft up to the closed
+  lane and jammed them there: the challenger map averaged 362 turns instead
+  of 91.
+- Recomputing every turn made aircraft switch back and forth (1,421 A-B-A
+  switches against 243 weather-driven ones) and changed outputs even without
+  weather.
+- Ignoring other aircraft keeps routing separate from capacity, which stays
+  the executor's job until reservations v2 (PR #10).
+
+**Consequences.**
+
+- Without weather nothing changes: no route becomes unusable, and the road
+  budget does not change any bundled plan.
+- Weather runs change wherever a route becomes unusable.
+- A rerouted aircraft drops its remaining planned waits and is no longer
+  coordinated with the others. Capacity stays safe, but turn counts on
+  crowded maps can grow until PR #10.
+- The weather reproducers of [BUG-003](bug-triage.md#bug-003) no longer hang:
+  after more than a hundred blocked turns, weather closes a lane on the
+  blocked route and one aircraft reroutes. The root cause remains.

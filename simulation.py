@@ -2,12 +2,14 @@ from connection import Connection
 from drone import Drone, DroneState
 from graph import Graph
 from pathfinder import Pathfinder
-from transport import is_available, travel_time
+from routing_policy import RoutingPolicy
+from transport import TransportMode, is_available, travel_time
 from zone import Zone
 from weather import NoWeather, WeatherProvider, WeatherState
 from events import (
     AgentMoved,
     AgentInTransit,
+    AgentRerouted,
     CapacitySnapshot,
     EventDispatcher,
     SimulationEvent,
@@ -39,6 +41,7 @@ class Simulator:
         nb_drones: int,
         dispatcher: EventDispatcher | None = None,
         weather: WeatherProvider | None = None,
+        policy: RoutingPolicy | None = None,
     ) -> None:
         self.graph = graph
         self.nb_drones = nb_drones
@@ -47,8 +50,9 @@ class Simulator:
             weather if weather is not None else NoWeather()
         )
         self.weather = WeatherState()
+        self.policy = policy if policy is not None else RoutingPolicy()
         self.drones: list[Drone] = []
-        self.pathfinder = Pathfinder(graph)
+        self.pathfinder = Pathfinder(graph, self.policy)
         self.turns: list[SimulationTurn] = []
         self._create_drones()
 
@@ -129,9 +133,10 @@ class Simulator:
 
     def _execute_turn(self, turn_number: int) -> SimulationTurn:
         """
-        A turn is processed in phases: finish existing transit, plan departures
-        from a stable snapshot, keep the moves that fit hub capacity, then
-        apply them.
+        A turn is processed in phases: finish existing transit, let aircraft
+        at hubs replace routes that became unusable, plan departures from a
+        stable snapshot, keep the moves that fit hub capacity, then apply
+        them.
         """
         turn = SimulationTurn(turn_number)
         self._emit(TurnStarted(turn_number))
@@ -144,6 +149,7 @@ class Simulator:
         self._finish_in_transit_drones(
             turn, turn_number, zone_occupancy, moved_drone_ids
         )
+        self._replan_routes(turn_number, moved_drone_ids)
 
         planned_moves = self._plan_departures(
             connection_usage, moved_drone_ids
@@ -195,6 +201,80 @@ class Simulator:
                 )
             )
         self.weather = weather
+
+    def _replan_routes(
+        self, turn_number: int, moved_drone_ids: set[int]
+    ) -> None:
+        """
+        Decision point for every aircraft waiting at a hub (ADR-011, ADR-018).
+
+        An aircraft keeps a route that is still usable. If weather made its
+        remaining route unusable, it searches for a route under the current
+        weather; if one exists it reroutes, otherwise it waits in the hub,
+        which is always safe, and keeps its route for when the weather
+        clears. Routes are always planned within the consecutive-road limit
+        from the aircraft's current road distance, so only weather can make
+        them unusable. Aircraft in transit are committed to their leg.
+        Capacity stays the executor's job: the new route ignores other
+        aircraft.
+        """
+        unavailable = self._unavailable_hub_pairs()
+        if not unavailable:
+            return
+
+        end_zone = self.graph.end_zone
+        assert end_zone is not None
+        for drone in self.drones:
+            if (
+                drone.is_delivered()
+                or drone.state == DroneState.IN_TRANSIT
+                or drone.drone_id in moved_drone_ids
+                or self._route_is_usable(drone, unavailable)
+            ):
+                continue
+
+            route = self.pathfinder.find_route(
+                drone.current_zone,
+                end_zone,
+                self.weather,
+                drone.road_km_since_air,
+            )
+            if route is None:
+                continue
+
+            drone.path = route
+            self._emit(
+                AgentRerouted(
+                    turn_number,
+                    drone.label,
+                    drone.current_zone.name,
+                    tuple(zone.name for zone in route),
+                )
+            )
+
+    def _unavailable_hub_pairs(self) -> set[frozenset[str]]:
+        """Pairs of hubs whose connection the current weather closes."""
+        return {
+            frozenset((connection.zone_a.name, connection.zone_b.name))
+            for connection in self.graph.connections
+            if not is_available(
+                connection, self.weather.condition_of(connection.name())
+            )
+        }
+
+    def _route_is_usable(
+        self, drone: Drone, unavailable: set[frozenset[str]]
+    ) -> bool:
+        """Whether no remaining leg uses an unavailable connection. Planned
+        waits are not legs."""
+        current = drone.current_zone
+        for zone in drone.path:
+            if zone is current:
+                continue
+            if frozenset((current.name, zone.name)) in unavailable:
+                return False
+            current = zone
+        return True
 
     def _finish_in_transit_drones(
         self,
@@ -377,6 +457,9 @@ class Simulator:
 
             current_count = zone_occupancy.get(next_zone.name, 0)
             zone_occupancy[drone.current_zone.name] -= 1
+            drone.road_km_since_air = self._road_km_after_departure(
+                drone, connection
+            )
 
             conn_name = connection.name()
             # Travel time is fixed at departure, under the current weather.
@@ -427,6 +510,16 @@ class Simulator:
                 )
             )
             moved_drone_ids.add(drone.drone_id)
+
+    def _road_km_after_departure(
+        self, drone: Drone, connection: Connection
+    ) -> int:
+        """Consecutive road distance once the aircraft takes this leg. The
+        executor follows routes that respect the limit, so it only records
+        the distance here."""
+        if connection.mode is TransportMode.ROAD:
+            return drone.road_km_since_air + connection.distance
+        return 0
 
     def _emit(self, event: SimulationEvent) -> None:
         if self.dispatcher is not None:
