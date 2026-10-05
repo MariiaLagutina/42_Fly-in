@@ -970,8 +970,12 @@ instead of 4 in the weather runs), and runs took 2.8 times longer.
   tentative. The rest of ADR-013 stands.
 - A rerouted aircraft is still not coordinated with the others. Deadlocks
   that follow are detected and handled ([ADR-020](#adr-020)).
-- The planner is more conservative. On the random maps 813 runs finish
-  sooner and 9 later than before, by up to 9 turns.
+- The planner is more conservative. Measured for the capacity-model
+  change alone (lanes only for admitted moves, plus this ADR's shared
+  rules), on the random maps 813 runs finish sooner and 9 later than
+  before, by up to 9 turns. This is not the result of the whole PR #10; see
+  [dynamic-routing.md](dynamic-routing.md#since-pr-10) for the final
+  comparison.
 - The invariant checker verifies the hub load including aircraft in
   transit and the departure rule.
 

@@ -174,6 +174,9 @@ that needs more than 1,500 turns counts as a hang.
 | Hangs | 13 | 0 |
 | Detected deadlocks | — | 0 |
 
+Of the 9,987 maps that finish both before and after PR #10, 964 finish
+sooner and 11 later, by up to 9 turns.
+
 Each change was also measured alone. Aligning the planner removes every
 late aircraft and every hang without weather. With seeded weather on 3,000
 random maps, it leaves one hang; adding the per-direction departure rule

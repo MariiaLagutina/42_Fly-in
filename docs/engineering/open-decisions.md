@@ -397,8 +397,10 @@ In short:
 - **No oscillation limit.** The PR #10 audit found no run that failed to
   finish because of repeated reroutes, so none is added.
 - **Evidence.** Three bundled maps change routes with the same turn
-  counts. On 10,000 random maps, 186 runs finish sooner and 8 one turn
-  later.
+  counts. On 10,000 random maps without weather, the branch with this rule
+  finishes 186 runs sooner and 8 runs one turn later than the same branch
+  without it. Measured on the PR #10 code before and after the rule; the
+  later deadlock handling never acts on these runs.
 
 The text below is the question as it was recorded before the decision.
 
