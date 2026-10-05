@@ -5,7 +5,7 @@ from typing import TypeAlias
 from airlanes.model.zone import Zone
 from airlanes.model.graph import Graph
 from airlanes.config import SimulationConfig
-from routing_policy import RoutingPolicy
+from airlanes.routing.policy import RoutingPolicy
 from airlanes.world.transport import is_available, travel_time
 from airlanes.world.weather import WeatherCondition, WeatherState
 

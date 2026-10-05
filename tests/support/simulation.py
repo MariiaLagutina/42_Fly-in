@@ -33,7 +33,7 @@ from events import (
     WeatherChanged,
 )
 from airlanes.model.graph import Graph
-from routing_policy import RoutingPolicy
+from airlanes.routing.policy import RoutingPolicy
 from simulation import Simulator
 from airlanes.model.transport_mode import TransportMode
 from airlanes.world.weather import WeatherProvider

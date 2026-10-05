@@ -1,8 +1,8 @@
 from airlanes.model.connection import Connection
 from airlanes.model.drone import Drone, DroneState
 from airlanes.model.graph import Graph
-from pathfinder import Pathfinder
-from routing_policy import RoutingPolicy
+from airlanes.routing.pathfinder import Pathfinder
+from airlanes.routing.policy import RoutingPolicy
 from airlanes.model.transport_mode import TransportMode
 from airlanes.world.transport import is_available, travel_time
 from airlanes.model.zone import Zone
