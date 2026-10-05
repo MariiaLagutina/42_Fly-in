@@ -151,12 +151,10 @@ class Simulator:
         )
         self._replan_routes(turn_number, moved_drone_ids)
 
-        planned_moves = self._plan_departures(
-            connection_usage, moved_drone_ids
-        )
+        candidates = self._plan_departures(moved_drone_ids)
 
         feasible_moves = self._select_feasible_moves(
-            planned_moves, connection_usage
+            candidates, connection_usage
         )
 
         self._apply_planned_moves(
@@ -320,10 +318,15 @@ class Simulator:
             moved_drone_ids.add(drone.drone_id)
 
     def _plan_departures(
-        self, connection_usage: dict[str, int], moved_drone_ids: set[int]
+        self, moved_drone_ids: set[int]
     ) -> list[tuple[Drone, Connection]]:
-        planned_moves: list[tuple[Drone, Connection]] = []
-        departed_this_turn: set[str] = set()
+        """
+        Aircraft that want to leave their hub this turn on an open lane, in
+        aircraft order. Planned waits are used up here. No lane capacity or
+        departure slot is taken yet: those go only to moves that are
+        admitted (DECISION-008).
+        """
+        candidates: list[tuple[Drone, Connection]] = []
 
         for drone in self.drones:
             if (
@@ -350,20 +353,9 @@ class Simulator:
             ):
                 continue
 
-            conn_name = connection.name()
-            used = connection_usage.get(conn_name, 0)
-            if used >= connection.max_link_capacity:
-                continue
+            candidates.append((drone, connection))
 
-            if connection.distance > 0 and conn_name in departed_this_turn:
-                continue
-
-            connection_usage[conn_name] = used + 1
-            if connection.distance > 0:
-                departed_this_turn.add(conn_name)
-            planned_moves.append((drone, connection))
-
-        return planned_moves
+        return candidates
 
     def _count_outgoing_by_zone(
         self, planned_moves: list[tuple[Drone, Connection]]
@@ -376,8 +368,71 @@ class Simulator:
 
     def _select_feasible_moves(
         self,
-        planned_moves: list[tuple[Drone, Connection]],
+        candidates: list[tuple[Drone, Connection]],
         connection_usage: dict[str, int],
+    ) -> list[tuple[Drone, Connection]]:
+        """
+        Choose this turn's departures from the candidates.
+
+        Lanes are handed out in aircraft order: lane capacity, and the one
+        departure slot of a distance lane. The moves that got a lane must
+        then fit their destination hubs. A move that holds a lane but cannot
+        enter its hub gives the lane back: it is excluded for this turn and
+        lanes are handed out again, so another aircraft can use that lane.
+        Each round excludes one move, so selection ends after at most as
+        many rounds as there are candidates. Kept moves are added to
+        `connection_usage`.
+        """
+        excluded: set[int] = set()
+        while True:
+            with_lane = self._assign_lanes(
+                candidates, connection_usage, excluded
+            )
+            kept = self._admit_to_hubs(with_lane)
+            if len(kept) == len(with_lane):
+                break
+            kept_ids = {drone.drone_id for drone, _connection in kept}
+            first_rejected = next(
+                drone
+                for drone, _connection in with_lane
+                if drone.drone_id not in kept_ids
+            )
+            excluded.add(first_rejected.drone_id)
+
+        for _drone, connection in kept:
+            conn_name = connection.name()
+            connection_usage[conn_name] = (
+                connection_usage.get(conn_name, 0) + 1
+            )
+        return kept
+
+    def _assign_lanes(
+        self,
+        candidates: list[tuple[Drone, Connection]],
+        connection_usage: dict[str, int],
+        excluded: set[int],
+    ) -> list[tuple[Drone, Connection]]:
+        """Candidates that get room on their lane, in aircraft order,
+        counting aircraft already on the lane."""
+        used = dict(connection_usage)
+        departed: set[str] = set()
+        with_lane: list[tuple[Drone, Connection]] = []
+        for drone, connection in candidates:
+            if drone.drone_id in excluded:
+                continue
+            conn_name = connection.name()
+            if used.get(conn_name, 0) >= connection.max_link_capacity:
+                continue
+            if connection.distance > 0:
+                if conn_name in departed:
+                    continue
+                departed.add(conn_name)
+            used[conn_name] = used.get(conn_name, 0) + 1
+            with_lane.append((drone, connection))
+        return with_lane
+
+    def _admit_to_hubs(
+        self, moves: list[tuple[Drone, Connection]]
     ) -> list[tuple[Drone, Connection]]:
         """
         Keep only the moves whose destination still has room after the turn.
@@ -389,7 +444,7 @@ class Simulator:
         no move is rejected. The selection only shrinks, so it terminates.
         """
         load = self._count_hub_load()
-        selected = planned_moves
+        selected = moves
 
         while True:
             leaving = self._count_outgoing_by_zone(selected)
@@ -412,19 +467,8 @@ class Simulator:
                 kept.append((drone, connection))
 
             if len(kept) == len(selected):
-                break
+                return kept
             selected = kept
-
-        kept_ids = {drone.drone_id for drone, _connection in selected}
-        for drone, connection in planned_moves:
-            conn_name = connection.name()
-            if (
-                drone.drone_id not in kept_ids
-                and connection_usage.get(conn_name, 0) > 0
-            ):
-                connection_usage[conn_name] -= 1
-
-        return selected
 
     def _count_hub_load(self) -> dict[str, int]:
         """Aircraft in each hub, plus aircraft flying towards it."""

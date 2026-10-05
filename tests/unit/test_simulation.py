@@ -502,3 +502,69 @@ def test_restricted_hub_with_room_for_two_is_not_overfilled() -> None:
     run = run_simulation(graph, 6)
 
     assert peak_hub_occupancy(run)["slow"] <= 2
+
+
+# --- Regression: departure arbitration (BUG-003 variant B) ------------------
+# A lane is handed out only to a move that can also enter its destination
+# hub. Before the fix, an aircraft that could not enter its hub still took
+# the lane first, every turn, and an aircraft that could leave never got it.
+# Both runs hung until the 10,000-turn limit.
+
+
+def test_rejected_departure_does_not_take_the_departure_slot() -> None:
+    """Canonical BUG-003 variant B. D10 in `S` waits for `h0`, which D11
+    occupies; D11 in `h0` could leave for `S`, but D10 took the lane's one
+    departure slot first on every turn."""
+    graph = build_graph(
+        [
+            start_hub("S"),
+            end_hub("E"),
+            hub("h0", ZoneType.PRIORITY),
+            hub("h1", ZoneType.RESTRICTED, capacity=2),
+            hub("h2"),
+        ],
+        [
+            Link("h1", "E", distance=450),
+            Link("h2", "h0", distance=150, mode=ROAD),
+            Link("S", "h2", capacity=2, distance=1200),
+            Link("E", "S", capacity=2, distance=700),
+            Link("S", "h0", capacity=3, distance=450),
+        ],
+    )
+
+    run = run_simulation(graph, 12)
+
+    assert check_invariants(run) == []
+
+
+def test_rejected_departure_does_not_take_lane_capacity() -> None:
+    """The same mechanism through lane capacity. After a reroute, D3 in
+    `h2` waits for `h4`, which D5 occupies, and D5 in `h4` wants `h2`, which
+    has room. Lane `h4-h2` holds one aircraft; D3 used to take it first."""
+    graph = build_graph(
+        [
+            start_hub("S"),
+            end_hub("E"),
+            hub("h1", ZoneType.PRIORITY),
+            hub("h2", capacity=3),
+            hub("h3", ZoneType.PRIORITY, capacity=3),
+            hub("h4"),
+            hub("h5"),
+        ],
+        [
+            Link("E", "h5"),
+            Link("S", "h4"),
+            Link("h1", "h5"),
+            Link("h4", "h2"),
+            Link("h5", "h4"),
+            Link("h3", "h5"),
+            Link("h2", "h3", capacity=2),
+            Link("h3", "h1"),
+            Link("S", "h2"),
+        ],
+    )
+    weather = ScriptedWeather({3: {"h3-h5": STORM}, 7: {"h3-h5": CLEAR}})
+
+    run = run_simulation(graph, 5, weather)
+
+    assert check_invariants(run) == []
