@@ -14,6 +14,10 @@ written from scratch in Python. On top of the routing core, the project adds
 an aviation layer: real maps of Germany and Europe, distance-based road and
 air legs, live weather, and a Pygame dispatch center.
 
+![Dispatch center on the Europe map: aircraft en route, storms and snow on air lanes, weather alerts and a departure board](docs/images/europe-simulation.png)
+
+![Dispatch center on the Germany map: aircraft and a car on a road leg, snow and rain on lanes, and the departure board](docs/images/germany-simulation.png)
+
 ## Highlights
 
 - **Space-time routing.** Flights are planned over `(hub, turn)` states with
