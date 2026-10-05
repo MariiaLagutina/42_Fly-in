@@ -660,3 +660,22 @@ def test_aircraft_are_delivered_when_planned(
 
     assert check_invariants(run) == []
     assert delivery_turns(run) == planned
+
+
+# --- Waiting happens in place (ADR-014, DECISION-007) -----------------------
+
+
+def test_aircraft_waits_in_place_instead_of_a_detour() -> None:
+    """With one lane to the goal, the third aircraft used to fly to the
+    priority hub `p` and back to pass time. It now waits at the start and
+    is delivered on the same turn."""
+    graph = build_graph(
+        [start_hub(), hub("p", ZoneType.PRIORITY), end_hub()],
+        [Link("start", "goal"), Link("start", "p")],
+    )
+
+    run = run_simulation(graph, 3)
+
+    assert check_invariants(run) == []
+    assert run.visited_zones("D3") == ["goal"]
+    assert delivery_turns(run) == {"D1": 1, "D2": 2, "D3": 3}

@@ -119,8 +119,10 @@ class Pathfinder:
         """
         Calculates optimal conflict-free routes considering constraints.
 
-        A search state is a hub at a turn, together with the consecutive road
-        distance driven to reach it. Two partial routes can reach the same
+        A route never returns to a hub it has left: waiting happens in
+        place, never through a detour that only passes time (ADR-014,
+        DECISION-007). A search state is a hub at a turn, together with the
+        consecutive road distance driven to reach it. Two partial routes can reach the same
         hub at the same turn with different road distances, and the one with
         less road may continue where the other cannot. A partial route is
         therefore dropped only when another one reached the same hub at the
@@ -153,6 +155,8 @@ class Pathfinder:
             possible_moves.append(current_zone)
 
             for next_zone in possible_moves:
+                if next_zone != current_zone and next_zone in path:
+                    continue
                 move_cost = self._calculate_move_cost(current_zone, next_zone)
                 next_t = t + move_cost
 
