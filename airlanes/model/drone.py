@@ -1,6 +1,6 @@
 from enum import Enum
 from typing import Optional
-from zone import Zone
+from airlanes.model.zone import Zone
 
 
 class DroneState(Enum):

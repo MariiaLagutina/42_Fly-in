@@ -4,7 +4,7 @@ from events import EventDispatcher
 from parser import Parser, ParseError
 from simulation import Simulator
 from visualizers import AirlinesVisualizer, CapacityInfoVisualizer, Visualizer
-from weather import RandomWeather
+from airlanes.world.weather import RandomWeather
 
 
 def main() -> None:

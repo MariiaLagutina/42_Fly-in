@@ -7,8 +7,8 @@ is willing to choose.
 
 from dataclasses import dataclass
 
-from connection import Connection
-from transport import TransportMode
+from airlanes.model.connection import Connection
+from airlanes.model.transport_mode import TransportMode
 
 
 @dataclass(frozen=True)

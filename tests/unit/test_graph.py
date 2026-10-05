@@ -4,9 +4,9 @@ Connections are only queried between distinct zones; self-loops are a known
 open issue and are not part of the tested contract.
 """
 
-from connection import Connection
-from graph import Graph
-from zone import Zone, ZoneType
+from airlanes.model.connection import Connection
+from airlanes.model.graph import Graph
+from airlanes.model.zone import Zone, ZoneType
 
 
 def build_graph(

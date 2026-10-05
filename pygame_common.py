@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Literal, Optional
 
 from events import EventListener, SimulationEvent
-from graph import Graph
+from airlanes.model.graph import Graph
 
 # Shared path for assets
 IMG_DIR = Path(__file__).resolve().parent / "img"

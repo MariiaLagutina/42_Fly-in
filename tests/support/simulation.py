@@ -32,12 +32,12 @@ from events import (
     TurnStarted,
     WeatherChanged,
 )
-from graph import Graph
+from airlanes.model.graph import Graph
 from routing_policy import RoutingPolicy
 from simulation import Simulator
-from transport import TransportMode
-from weather import WeatherProvider
-from zone import ZoneType
+from airlanes.model.transport_mode import TransportMode
+from airlanes.world.weather import WeatherProvider
+from airlanes.model.zone import ZoneType
 
 
 class EventRecorder:

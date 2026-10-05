@@ -2,8 +2,8 @@
 
 import pytest
 
-from drone import Drone, DroneState
-from zone import Zone
+from airlanes.model.drone import Drone, DroneState
+from airlanes.model.zone import Zone
 
 
 @pytest.fixture

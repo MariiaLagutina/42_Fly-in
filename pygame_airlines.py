@@ -12,7 +12,7 @@ from events import (
     WeatherChanged,
     TurnStarted,
 )
-from connection import Connection
+from airlanes.model.connection import Connection
 from pygame_common import (
     PygameEventCollector,
     DroneDisplayPosition,
@@ -24,8 +24,8 @@ from pygame_common import (
     IMG_DIR,
     Point,
 )
-from transport import TransportMode
-from zone import Zone
+from airlanes.model.transport_mode import TransportMode
+from airlanes.model.zone import Zone
 
 
 class FlightInfo(TypedDict):

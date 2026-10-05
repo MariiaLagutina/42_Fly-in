@@ -9,10 +9,10 @@ from pathlib import Path
 
 import pytest
 
-from graph import Graph
+from airlanes.model.graph import Graph
 from parser import ParseError, Parser
-from transport import TransportMode
-from zone import ZoneType
+from airlanes.model.transport_mode import TransportMode
+from airlanes.model.zone import ZoneType
 
 MAPS_DIR = Path(__file__).resolve().parents[2] / "maps"
 MAP_FILES = sorted(MAPS_DIR.glob("*/*.txt"))

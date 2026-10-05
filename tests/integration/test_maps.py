@@ -20,7 +20,7 @@ from tests.support.simulation import (
     planned_delivery_turns,
     run_simulation,
 )
-from weather import RandomWeather
+from airlanes.world.weather import RandomWeather
 
 MAPS_DIR = Path(__file__).resolve().parents[2] / "maps"
 MAP_FILES = sorted(MAPS_DIR.glob("*/*.txt"))

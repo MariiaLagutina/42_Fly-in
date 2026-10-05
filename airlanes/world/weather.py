@@ -13,7 +13,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from graph import Graph
+    from airlanes.model.graph import Graph
 
 
 class WeatherCondition(Enum):

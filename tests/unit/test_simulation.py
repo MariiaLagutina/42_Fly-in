@@ -10,7 +10,7 @@ distance travel-time formula leave no room for another valid answer.
 import pytest
 
 from events import AgentInTransit, AgentRerouted, WeatherChanged
-from graph import Graph
+from airlanes.model.graph import Graph
 from simulation import DeadlockError
 from tests.support.graphs import Link, build_graph, end_hub, hub, start_hub
 from tests.support.simulation import (
@@ -21,9 +21,9 @@ from tests.support.simulation import (
     SimulationRun,
     run_simulation,
 )
-from transport import TransportMode
-from weather import ScriptedWeather, WeatherCondition
-from zone import ZoneType
+from airlanes.model.transport_mode import TransportMode
+from airlanes.world.weather import ScriptedWeather, WeatherCondition
+from airlanes.model.zone import ZoneType
 
 AIR = TransportMode.AIR
 ROAD = TransportMode.ROAD

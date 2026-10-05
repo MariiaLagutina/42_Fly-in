@@ -2,10 +2,10 @@
 
 from dataclasses import dataclass
 
-from connection import Connection
-from graph import Graph
-from transport import TransportMode
-from zone import Zone, ZoneType
+from airlanes.model.connection import Connection
+from airlanes.model.graph import Graph
+from airlanes.model.transport_mode import TransportMode
+from airlanes.model.zone import Zone, ZoneType
 
 
 @dataclass(frozen=True)

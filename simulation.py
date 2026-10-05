@@ -1,11 +1,12 @@
-from connection import Connection
-from drone import Drone, DroneState
-from graph import Graph
+from airlanes.model.connection import Connection
+from airlanes.model.drone import Drone, DroneState
+from airlanes.model.graph import Graph
 from pathfinder import Pathfinder
 from routing_policy import RoutingPolicy
-from transport import TransportMode, is_available, travel_time
-from zone import Zone
-from weather import NoWeather, WeatherProvider, WeatherState
+from airlanes.model.transport_mode import TransportMode
+from airlanes.world.transport import is_available, travel_time
+from airlanes.model.zone import Zone
+from airlanes.world.weather import NoWeather, WeatherProvider, WeatherState
 from events import (
     AgentMoved,
     AgentInTransit,

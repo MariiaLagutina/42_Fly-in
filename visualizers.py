@@ -5,7 +5,7 @@ from events import (
     SimulationEvent,
     TurnStarted,
 )
-from graph import Graph
+from airlanes.model.graph import Graph
 from simulation import SimulationTurn
 
 

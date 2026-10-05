@@ -4,7 +4,7 @@ import math
 
 import pytest
 
-from zone import Zone, ZoneType
+from airlanes.model.zone import Zone, ZoneType
 
 
 def test_defaults() -> None:

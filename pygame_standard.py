@@ -7,8 +7,8 @@ from events import (
     AgentInTransit,
     TurnFinished,
 )
-from graph import Graph
-from zone import Zone, ZoneType
+from airlanes.model.graph import Graph
+from airlanes.model.zone import Zone, ZoneType
 from pygame_common import (
     PygameEventCollector,
     DroneDisplayPosition,
