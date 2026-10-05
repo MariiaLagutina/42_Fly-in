@@ -121,12 +121,14 @@ class Pathfinder:
 
         A route never returns to a hub it has left: waiting happens in
         place, never through a detour that only passes time (ADR-014,
-        DECISION-007). A search state is a hub at a turn, together with the
-        consecutive road distance driven to reach it. Two partial routes can reach the same
-        hub at the same turn with different road distances, and the one with
-        less road may continue where the other cannot. A partial route is
-        therefore dropped only when another one reached the same hub at the
-        same turn with no higher score and no more road.
+        DECISION-007).
+
+        A search state is a hub at a turn, together with the consecutive
+        road distance driven to reach it. Two partial routes can reach the
+        same hub at the same turn with different road distances, and the one
+        with less road may continue where the other cannot. A partial route
+        is therefore dropped only when another one reached the same hub at
+        the same turn with no higher score and no more road.
         """
         if self.find_route(start, end, WeatherState()) is None:
             return []
