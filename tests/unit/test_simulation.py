@@ -14,7 +14,9 @@ from graph import Graph
 from tests.support.graphs import Link, build_graph, end_hub, hub, start_hub
 from tests.support.simulation import (
     check_invariants,
+    delivery_turns,
     peak_hub_occupancy,
+    planned_delivery_turns,
     SimulationRun,
     run_simulation,
 )
@@ -568,3 +570,93 @@ def test_rejected_departure_does_not_take_lane_capacity() -> None:
     run = run_simulation(graph, 5, weather)
 
     assert check_invariants(run) == []
+
+
+# --- One capacity model for planner and executor (ADR-019) ------------------
+# The planner holds a hub from the turn a leg towards it departs, holds a
+# lane on every turn of a leg, and allows one departure per direction per
+# turn on a distance lane, exactly as the executor does. Without weather,
+# plans therefore execute exactly. Before, the planner booked a hub only on
+# the arrival turn, so the executor delayed planned departures, the planned
+# meeting points shifted, and some runs hung (BUG-003).
+
+
+def canonical_variant_a() -> Graph:
+    """Canonical BUG-003 variant A. The old plans parked aircraft in the
+    priority hub `h0` and brought them back, so D9 in `h2` and D11 in `h4`
+    ended up waiting for each other's hub on lane `h4-h2`."""
+    return build_graph(
+        [
+            start_hub("S"),
+            end_hub("E"),
+            hub("h0", ZoneType.PRIORITY),
+            hub("h1", ZoneType.BLOCKED),
+            hub("h2"),
+            hub("h3", ZoneType.RESTRICTED, capacity=2),
+            hub("h4"),
+        ],
+        [
+            Link("h2", "h0", capacity=3, distance=80, mode=ROAD),
+            Link("h1", "E", capacity=3, distance=700),
+            Link("h4", "h2", capacity=3, distance=150, mode=ROAD),
+            Link("h4", "h3", capacity=3, distance=700),
+            Link("h3", "S", capacity=2, distance=700),
+            Link("S", "E", distance=450),
+        ],
+    )
+
+
+def restricted_hub_queue() -> Graph:
+    """Five aircraft through a one-slot restricted hub."""
+    return build_graph(
+        [start_hub(), hub("slow", ZoneType.RESTRICTED), end_hub()],
+        [Link("start", "slow", capacity=2), Link("slow", "goal")],
+    )
+
+
+def zero_distance_lane_into_restricted_hub() -> Graph:
+    """A two-turn lane without a distance: the planner used to check the
+    lane only on the departure turn."""
+    return build_graph(
+        [
+            start_hub("S"),
+            end_hub("E"),
+            hub("h0", ZoneType.PRIORITY),
+            hub("h1", capacity=3),
+            hub("h2", ZoneType.PRIORITY),
+            hub("h3", ZoneType.RESTRICTED, capacity=3),
+            hub("h4", ZoneType.BLOCKED),
+        ],
+        [
+            Link("h4", "h3", capacity=3),
+            Link("E", "h2", capacity=2),
+            Link("E", "h0"),
+            Link("h2", "h1"),
+            Link("E", "h3"),
+            Link("h0", "h1"),
+            Link("S", "h3", capacity=2),
+            Link("h3", "h1", capacity=3),
+        ],
+    )
+
+
+@pytest.mark.parametrize(
+    ("graph", "nb_aircraft"),
+    [
+        pytest.param(canonical_variant_a(), 12, id="bug-003-variant-a"),
+        pytest.param(restricted_hub_queue(), 5, id="restricted-hub-queue"),
+        pytest.param(
+            zero_distance_lane_into_restricted_hub(), 10,
+            id="zero-distance-lane",
+        ),
+    ],
+)
+def test_aircraft_are_delivered_when_planned(
+    graph: Graph, nb_aircraft: int
+) -> None:
+    planned = planned_delivery_turns(graph, nb_aircraft)
+
+    run = run_simulation(graph, nb_aircraft)
+
+    assert check_invariants(run) == []
+    assert delivery_turns(run) == planned

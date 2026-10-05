@@ -224,3 +224,79 @@ def test_detects_a_reroute_away_from_the_current_hub() -> None:
     ])
 
     assert has_violation(run, "D1 rerouted at gate but was at start")
+
+
+def distance_lane_graph() -> Graph:
+    """`start-a` is a 150 km air lane: one turn, with a departure rule."""
+    return build_graph(
+        [start_hub(), hub("a", capacity=2), end_hub()],
+        [Link("start", "a", capacity=3, distance=150), Link("a", "goal")],
+    )
+
+
+def test_detects_two_departures_in_one_direction() -> None:
+    run = fake_run(distance_lane_graph(), 2, [
+        [moved(1, "D1", "start", "a"), moved(1, "D2", "start", "a")],
+        [moved(2, "D1", "a", "goal")],
+        [moved(3, "D2", "a", "goal")],
+    ])
+
+    assert has_violation(
+        run, "D2 was a second departure from start on lane start-a"
+    )
+
+
+def test_accepts_departures_in_opposite_directions() -> None:
+    run = fake_run(distance_lane_graph(), 2, [
+        [moved(1, "D1", "start", "a")],
+        [moved(2, "D1", "a", "start"), moved(2, "D2", "start", "a")],
+        [moved(3, "D1", "start", "a"), moved(3, "D2", "a", "goal")],
+        [moved(4, "D1", "a", "goal")],
+    ])
+
+    assert check_invariants(run) == []
+
+
+def claim_graph(gate_capacity: int) -> Graph:
+    """`start-gate` is a 450 km air lane, two turns long; `b-gate` takes one
+    turn."""
+    return build_graph(
+        [start_hub(), hub("b"), hub("gate", capacity=gate_capacity),
+         end_hub()],
+        [
+            Link("start", "gate", distance=450),
+            Link("start", "b"),
+            Link("b", "gate"),
+            Link("gate", "goal"),
+        ],
+    )
+
+
+def claim_stream() -> list[list[SimulationEvent]]:
+    """D1 flies to `gate` on turns 2-3 while D2 enters `gate` on turn 2 and
+    leaves it on turn 3: the hub never holds two aircraft, but on turn 2 it
+    holds one and expects another."""
+    return [
+        [moved(1, "D2", "start", "b")],
+        [
+            AgentInTransit(2, "D1", "start", "start-gate", "gate"),
+            moved(2, "D2", "b", "gate"),
+        ],
+        [moved(3, "D2", "gate", "goal"), moved(3, "D1", "start", "gate")],
+        [moved(4, "D1", "gate", "goal")],
+    ]
+
+
+def test_detects_hub_load_over_capacity_from_aircraft_in_transit() -> None:
+    run = fake_run(claim_graph(1), 2, claim_stream())
+
+    assert has_violation(
+        run, "hub gate holds 1 and 1 more are flying to it, capacity 1"
+    )
+    assert not has_violation(run, "hub gate holds 2")
+
+
+def test_accepts_aircraft_in_transit_when_the_hub_has_room() -> None:
+    run = fake_run(claim_graph(2), 2, claim_stream())
+
+    assert check_invariants(run) == []

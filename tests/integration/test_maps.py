@@ -16,6 +16,8 @@ from parser import Parser
 from tests.support.simulation import (
     SimulationRun,
     check_invariants,
+    delivery_turns,
+    planned_delivery_turns,
     run_simulation,
 )
 from weather import RandomWeather
@@ -73,6 +75,18 @@ def test_map_is_delivered_without_violations(map_file: Path) -> None:
 
     assert check_invariants(run) == []
     assert not any(isinstance(e, AgentRerouted) for e in run.events)
+
+
+@pytest.mark.parametrize("map_file", MAP_FILES, ids=map_id)
+def test_aircraft_are_delivered_when_planned(map_file: Path) -> None:
+    """Planner and executor apply one capacity model (ADR-019), so without
+    weather every aircraft is delivered on the turn its plan says."""
+    graph, nb_aircraft = Parser().parse(str(map_file))
+    planned = planned_delivery_turns(graph, nb_aircraft)
+
+    run = simulate(map_id(map_file))
+
+    assert delivery_turns(run) == planned
 
 
 @pytest.mark.parametrize(

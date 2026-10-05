@@ -86,32 +86,10 @@ class Simulator:
                     "No valid route found between start and end zones."
                 )
 
-            drone.path = path[1:] if path else []
-            t = 0
-            for i in range(len(path) - 1):
-                z_curr, z_next = path[i], path[i + 1]
-
-                # Use the centralized pathfinder logic
-                cost = self.pathfinder._calculate_move_cost(z_curr, z_next)
-
-                if z_next != z_curr:
-                    conn = self.graph.get_connection(z_curr, z_next)
-                    if conn:
-                        if conn.distance > 0:
-                            conn_reserv[(f"{conn.name()}_dept", t)] = 1
-                        for tau in range(t, t + cost):
-                            conn_reserv[(conn.name(), tau)] = (
-                                conn_reserv.get((conn.name(), tau), 0) + 1
-                            )
-
-                t += cost
-                if not z_next.is_start and not z_next.is_end:
-                    reservations[(z_next.name, t)] = (
-                        reservations.get((z_next.name, t), 0) + 1
-                    )
-                    global_usage[z_next.name] = (
-                        global_usage.get(z_next.name, 0) + 1
-                    )
+            drone.path = path[1:]
+            self.pathfinder.reserve_path(
+                path, reservations, conn_reserv, global_usage
+            )
 
     def _path_cost(self, path: list[Zone]) -> int:
         return sum(zone.movement_cost() for zone in path[1:])
@@ -424,9 +402,11 @@ class Simulator:
             if used.get(conn_name, 0) >= connection.max_link_capacity:
                 continue
             if connection.distance > 0:
-                if conn_name in departed:
+                # One departure per direction per turn (DECISION-008).
+                direction = f"{conn_name}:{drone.current_zone.name}"
+                if direction in departed:
                     continue
-                departed.add(conn_name)
+                departed.add(direction)
             used[conn_name] = used.get(conn_name, 0) + 1
             with_lane.append((drone, connection))
         return with_lane

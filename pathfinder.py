@@ -287,6 +287,65 @@ class Pathfinder:
 
         return travel_time(conn, next_zone, WeatherCondition.CLEAR)
 
+    def reserve_path(
+        self,
+        path: list[Zone],
+        reservations: dict[tuple[str, int], int],
+        conn_reserv: dict[tuple[str, int], int],
+        global_usage: dict[str, int],
+    ) -> None:
+        """
+        Record a planned route in the reservation tables, with the same
+        capacity rules that `_is_move_valid` checks and that the executor
+        applies (ADR-008, ADR-019):
+
+        - a hub is held from the turn a leg towards it departs until the
+          aircraft leaves it again; a wait holds the hub for one more turn;
+        - a lane is held on every turn of a leg, from departure to arrival;
+        - a distance lane allows one departure per direction per turn.
+
+        Start and end hubs hold any number of aircraft and are not booked.
+        """
+        t = 0
+        for current_zone, next_zone in zip(path, path[1:]):
+            cost = self._calculate_move_cost(current_zone, next_zone)
+            if next_zone != current_zone:
+                conn = self.graph.get_connection(current_zone, next_zone)
+                if conn:
+                    if conn.distance > 0:
+                        key = self._departure_key(conn.name(), current_zone)
+                        conn_reserv[(key, t)] = 1
+                    for tau in range(t, t + cost):
+                        conn_reserv[(conn.name(), tau)] = (
+                            conn_reserv.get((conn.name(), tau), 0) + 1
+                        )
+            if not next_zone.is_start and not next_zone.is_end:
+                for tau in self._held_turns(
+                    current_zone, next_zone, t, cost
+                ):
+                    reservations[(next_zone.name, tau)] = (
+                        reservations.get((next_zone.name, tau), 0) + 1
+                    )
+                global_usage[next_zone.name] = (
+                    global_usage.get(next_zone.name, 0) + 1
+                )
+            t += cost
+
+    @staticmethod
+    def _held_turns(
+        current_zone: Zone, next_zone: Zone, t: int, cost: int
+    ) -> range:
+        """Turns on which a step from turn `t` holds `next_zone`. A leg holds
+        its destination from departure, as the executor does (ADR-008)."""
+        first = t + 1 if next_zone != current_zone else t + cost
+        return range(first, t + cost + 1)
+
+    @staticmethod
+    def _departure_key(conn_name: str, origin: Zone) -> str:
+        """One departure per distance lane and direction per turn
+        (DECISION-008)."""
+        return f"{conn_name}_dept_{origin.name}"
+
     def _is_move_valid(
         self,
         curr_zone: Zone,
@@ -296,13 +355,12 @@ class Pathfinder:
         reservations: dict[tuple[str, int], int],
         conn_reserv: dict[tuple[str, int], int],
     ) -> bool:
-        """Checks if the destination and connections have available capacity"""
-        next_t = t + move_cost
-
-        # Check if the destination zone is full when we arrive
-        booked = reservations.get((next_zone.name, next_t), 0)
-        if booked >= next_zone.effective_capacity():
-            return False
+        """Checks if the destination and connections have available capacity
+        under the rules of `reserve_path`."""
+        capacity = next_zone.effective_capacity()
+        for tau in self._held_turns(curr_zone, next_zone, t, move_cost):
+            if reservations.get((next_zone.name, tau), 0) >= capacity:
+                return False
 
         if next_zone == curr_zone:
             return True
@@ -311,16 +369,13 @@ class Pathfinder:
         if not conn:
             return True
 
-        # Check for mid-air collisions/head-on traffic on the connection
         if conn.distance > 0:
-            if conn_reserv.get((f"{conn.name()}_dept", t), 0) > 0:
+            key = self._departure_key(conn.name(), curr_zone)
+            if conn_reserv.get((key, t), 0) > 0:
                 return False
-            for tau in range(t, t + move_cost):
-                reserved = conn_reserv.get((conn.name(), tau), 0)
-                if reserved >= conn.max_link_capacity:
-                    return False
-        else:
-            if conn_reserv.get((conn.name(), t), 0) >= conn.max_link_capacity:
+        for tau in range(t, t + move_cost):
+            reserved = conn_reserv.get((conn.name(), tau), 0)
+            if reserved >= conn.max_link_capacity:
                 return False
 
         return True
