@@ -23,14 +23,16 @@ text; the superseding ADR states what it replaces.
 | [ADR-008](#adr-008) | Hub capacity counts aircraft flying towards the hub | Accepted |
 | [ADR-009](#adr-009) | Python 3.14 is the single supported version; CI runs the local quality gates | Accepted |
 | [ADR-010](#adr-010) | An aircraft in transit is committed to its leg | Accepted |
-| [ADR-011](#adr-011) | Routing decisions are made at hubs; replanning is triggered by events | Accepted; partly superseded by [ADR-015](#adr-015) |
+| [ADR-011](#adr-011) | Routing decisions are made at hubs; replanning is triggered by events | Accepted; partly superseded by [ADR-015](#adr-015) and [ADR-020](#adr-020) |
 | [ADR-012](#adr-012) | Weather comes from a provider as a snapshot of the current state | Accepted |
-| [ADR-013](#adr-013) | Routing uses explicit state; planner and executor share one capacity model | Accepted; partly superseded by [ADR-015](#adr-015) |
+| [ADR-013](#adr-013) | Routing uses explicit state; planner and executor share one capacity model | Accepted; partly superseded by [ADR-015](#adr-015) and [ADR-019](#adr-019) |
 | [ADR-014](#adr-014) | Waiting happens in place; deadlocks are detected, not waited out | Accepted |
 | [ADR-015](#adr-015) | Every hub is a safe waiting location; hub capacity has one layer | Accepted |
 | [ADR-016](#adr-016) | Transport mode is map data; weather acts through one set of transport rules | Accepted |
 | [ADR-017](#adr-017) | Road is a fallback with a consecutive-road budget | Accepted |
 | [ADR-018](#adr-018) | Aircraft reroute only when weather makes their route unusable | Accepted |
+| [ADR-019](#adr-019) | One capacity model; committed claims are the only live reservations | Accepted |
+| [ADR-020](#adr-020) | Structural deadlocks are detected each turn and resolved or reported | Accepted |
 
 ---
 
@@ -384,7 +386,8 @@ on knowing where every aircraft in transit will arrive.
 ### Routing decisions are made at hubs; replanning is triggered by events
 
 - **Status:** Accepted; partly superseded by [ADR-015](#adr-015) (hub
-  safety, waiting, and weather diversion)
+  safety, waiting, and weather diversion) and [ADR-020](#adr-020) (the
+  no-progress threshold)
 - **Date:** 2026-10-04
 
 **Context.** Every route is planned once, before the first turn, and never
@@ -500,7 +503,7 @@ global state.
 ### Routing uses explicit state; planner and executor share one capacity model
 
 - **Status:** Accepted; partly superseded by [ADR-015](#adr-015) (two
-  layers of hub capacity)
+  layers of hub capacity) and [ADR-019](#adr-019) (reservations v2)
 - **Date:** 2026-10-04
 
 **Context.** The planner and the executor apply different capacity rules:
@@ -882,3 +885,170 @@ forecasts ([ADR-012](#adr-012)), and every hub is a safe place to wait
 - The weather reproducers of [BUG-003](bug-triage.md#bug-003) no longer hang:
   after more than a hundred blocked turns, weather closes a lane on the
   blocked route and one aircraft reroutes. The root cause remains.
+
+---
+
+## ADR-019
+
+### One capacity model; committed claims are the only live reservations
+
+- **Status:** Accepted
+- **Date:** 2026-10-05
+
+**Context.** [ADR-013](#adr-013) requires that planner and executor apply
+one capacity model and planned live reservations owned by aircraft. They
+disagreed in three ways:
+
+- the planner booked a hub only on the turn an aircraft arrived, while the
+  executor holds it from the departure of a leg towards it
+  ([ADR-008](#adr-008));
+- the planner checked a lane without a distance only on the departure turn
+  of a two-turn leg, while the executor counts the aircraft on the lane
+  until it arrives;
+- the executor handed out a lane's capacity and its one departure slot
+  before it knew whether the move fit its destination hub, so a rejected
+  move kept the lane from an aircraft that could leave
+  ([BUG-003](bug-triage.md#bug-003) variant B).
+
+Both sides allowed one departure per distance lane per turn in either
+direction, which forbade two aircraft from swapping full hubs over a lane
+with room for both (variant A, [DECISION-008](open-decisions.md#decision-008)).
+
+The PR #10 audit (see [dynamic-routing.md](dynamic-routing.md#since-pr-10))
+measured 10,000 random maps without weather: 1,681 had an aircraft
+delivered later than planned and 13 hung. It also tried rerouting against
+reservations derived from every other aircraft's remaining route: turn
+counts moved both ways, structural deadlocks became more frequent (18
+instead of 4 in the weather runs), and runs took 2.8 times longer.
+
+**Decision.**
+
+- **Shared rules.** Planner and executor apply the same capacity rules:
+  - a hub's load is the aircraft in it plus the aircraft flying towards it,
+    and never exceeds its capacity at the end of a turn; start and end hubs
+    are unlimited;
+  - a leg holds its destination hub from its departure turn to its arrival
+    turn;
+  - a lane is held on every turn of a leg, from departure to arrival,
+    whatever its distance, and both directions count towards its capacity;
+  - a distance lane allows one departure per direction per turn
+    (DECISION-008);
+  - a hub is freed in the same turn only by aircraft that actually leave.
+- **Lanes go only to admitted moves.** The executor collects the aircraft
+  that want to leave, hands out lanes in aircraft order, and keeps the
+  moves that fit their hubs. A move that holds a lane but cannot enter its
+  hub is excluded for that turn and the lanes are handed out again. Each
+  round excludes one move, so the selection is bounded and deterministic.
+- **No reservation store.** What an aircraft holds now is derived from its
+  state, not stored:
+  - its place in its hub;
+  - while in transit, its claim on the destination hub and its place on
+    the lane, created at departure and turned into occupancy on arrival.
+
+  Future hubs, lanes, and waits are tentative. They exist only while the
+  cooperative planner builds the initial routes, and in each aircraft's
+  route. A reroute replaces the route; there is nothing to release.
+- **Executor as a safety layer.** The executor still validates every move.
+
+**Rationale.**
+
+- With the same rules, a plan that the planner accepts is a plan the
+  executor runs: on the 10,000 random maps, no aircraft is late and none
+  hangs. Bundled map output does not change.
+- A rejected move gives nothing up. Handing lanes only to admitted moves
+  removes the wasted-lane deadlock without any retry loop.
+- Opposite directions do not compete for a departure slot, which models
+  takeoff separation within one direction. Removing the rule completely
+  would change the bonus maps (Germany from 14 to 9 printed turns).
+- Derived claims cannot leak: every claim belongs to an aircraft's current
+  state. Live future reservations did not make rerouting better.
+
+**Consequences.**
+
+- The "Reservations v2" part of ADR-013 is replaced: reservations are not
+  stored live; committed claims are derived and future reservations stay
+  tentative. The rest of ADR-013 stands.
+- A rerouted aircraft is still not coordinated with the others. Deadlocks
+  that follow are detected and handled ([ADR-020](#adr-020)).
+- The planner is more conservative. On the random maps 813 runs finish
+  sooner and 9 later than before, by up to 9 turns.
+- The invariant checker verifies the hub load including aircraft in
+  transit and the departure rule.
+
+---
+
+## ADR-020
+
+### Structural deadlocks are detected each turn and resolved or reported
+
+- **Status:** Accepted
+- **Date:** 2026-10-05
+
+**Context.** [ADR-014](#adr-014) requires deadlocks to be detected and
+handled, and [ADR-011](#adr-011) proposed a no-progress threshold as a
+replanning trigger. After [ADR-019](#adr-019), plans without weather
+execute exactly. Deadlocks remain possible after weather reroutes, which
+ignore other aircraft ([ADR-018](#adr-018)): for example, two aircraft in
+full hubs that each need the other's hub over a lane for one aircraft. No
+legal next state exists, and the run used to continue until the
+10,000-turn limit. A turn without movement is not a deadlock: aircraft can
+be in transit, wait for weather, or follow a planned wait. The planner also
+used routes that left a hub and came back only to pass time, which created
+opposite traffic ([DECISION-007](open-decisions.md#decision-007)).
+
+**Decision.**
+
+- **Definition.** After each turn's moves, a structural deadlock is the
+  largest set of aircraft at hubs such that:
+  - each tried to leave on a lane open under the current weather and was
+    not admitted;
+  - everything that blocks it is a member: the aircraft in or flying to its
+    full destination hub, and the aircraft on its full lane.
+
+  Nothing outside the set can release it. An aircraft that waits for
+  weather, a planned wait, or an aircraft in transit is never a member.
+- **Response.** On the turn a deadlock is found:
+  1. the first member, in aircraft order, with a route under the current
+     weather that avoids the hub it waits for takes that route
+     (`AgentRerouted` with reason `deadlock`);
+  2. if no member has one now, but one would exist with every lane open,
+     the aircraft wait and the check repeats on the next turn;
+  3. otherwise the run stops with `DeadlockError`, which names the turn,
+     the aircraft, and their hubs.
+- **The clear-weather check is not a forecast.** It never predicts future
+  weather. It is a classification probe: is a way out structurally possible
+  under the topology and the routing policy once the current, temporary
+  weather restriction is removed? If yes, the situation may change, so the
+  aircraft wait. If no, no weather can help.
+- **No no-progress threshold.** The threshold proposed in ADR-011 is not
+  added.
+- **Waiting happens in place.** A planned route never returns to a hub it
+  has left. Revisiting a hub happens only across decisions: a reroute, a
+  deadlock way-around, or backtracking plans a simple route from the
+  current hub. No route search can loop to reset the road budget.
+- **`AgentRerouted.reason`.** Every reroute says why it happened: `weather`
+  or `deadlock`.
+
+**Rationale.**
+
+- The definition needs no history and no guessed number of turns. The
+  members hold every resource they wait for, so the state repeats until a
+  route changes.
+- A threshold cannot tell a deadlock from a long wait for weather or a
+  planned wait. It would only add a second, weaker detector.
+- A route that avoids the blocked hub is the smallest change that breaks
+  the cycle. Only one aircraft reroutes per turn, so the response stays
+  deterministic.
+- Stopping with a named error turns a silent hang into a diagnosable
+  failure.
+- Simple routes remove the waiting cycles that created opposite traffic.
+
+**Consequences.**
+
+- Waiting forever for a lane that never reopens is not a deadlock. Such a
+  run still ends at the 10,000-turn limit.
+- Three bundled maps change routes and keep their turn counts: an aircraft
+  that used to fly out and back from the start now waits there.
+- Supersedes the no-progress threshold of ADR-011 and refines the deadlock
+  handling of ADR-014.
+- Resolves [DECISION-007](open-decisions.md#decision-007).

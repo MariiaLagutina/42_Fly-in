@@ -87,15 +87,18 @@ best-first search over `(hub, turn)` states, which also track the consecutive
 road distance driven. While a route is being built, the planner reads and
 updates shared reservation tables:
 
-- hub occupancy at each turn
+- hub occupancy at each turn, including every turn of a leg flying towards
+  the hub
 - lane usage for every turn a leg is in progress
 - departure slots on distance-based lanes, so two aircraft do not take off
-  on the same lane in the same turn
+  on the same lane in the same direction in the same turn
 
-A candidate move is accepted only if the destination hub has room at the
-arrival turn and the lane stays available for the whole leg. Holding in place
-is a valid move, which lets an aircraft wait out a conflict instead of taking
-a much longer route.
+A candidate move is accepted only if the destination hub has room from the
+departure turn to the arrival turn and the lane stays available for the
+whole leg. These are the same rules the simulator applies when it runs the
+plan, so without weather every flight lands exactly when planned. Holding in
+place is a valid move, and the only way to wait: a route never returns to a
+hub it has left.
 
 The cost of a move combines its travel time (restricted hubs take two turns,
 distance-based legs follow the table below), a discount for priority hubs, and
@@ -109,7 +112,8 @@ compact schedules on all included maps.
 During execution, the simulator runs each turn in phases: aircraft finishing
 a leg arrive first, then aircraft at hubs check their routes, departures are
 planned from a stable snapshot, and only moves that pass the capacity checks
-are applied.
+are applied. A lane goes only to a departure that also fits its destination
+hub, so an aircraft that has to wait never blocks one that could leave.
 
 ### Rerouting
 
@@ -120,6 +124,16 @@ none, it waits in the hub, which is always safe, and continues once the
 weather clears. A route that is still usable is kept even if another one has
 become faster, and an aircraft in the middle of a leg always finishes it.
 Rerouting ignores other aircraft; the capacity checks above still apply.
+
+### Deadlocks
+
+Because rerouting ignores other aircraft, two aircraft can end up in full
+hubs, each needing the other's hub over a lane with room for only one. After
+every turn the simulator looks for aircraft that block only each other. One
+of them takes a route around the hub it waits for, if there is one. If such a
+route would exist once the weather clears, the aircraft wait. Otherwise the
+run stops with an error that names the turn, the aircraft, and their hubs,
+instead of running on forever.
 
 ### Road budget
 
@@ -228,7 +242,8 @@ The parser reports malformed lines, duplicate hubs and lanes, invalid
 capacities and distances, unknown hub types and transport modes, road lanes
 without a distance, and missing start or end hubs as a `ParseError`
 with the line number. If no route connects the start and end hubs, the
-simulator stops with an explicit error.
+simulator stops with an explicit error, and so it does when aircraft block
+each other with no way around (`DeadlockError`).
 
 ### Included maps
 
@@ -259,7 +274,7 @@ map file → Parser → Graph (hubs, lanes)
 | `drone.py` | State of a single aircraft (waiting, in transit, delivered) |
 | `pathfinder.py` | Cooperative space-time search, reroute search, and move costs |
 | `routing_policy.py` | Routing limits, such as the consecutive-road budget |
-| `simulation.py` | Turn execution and capacity checks |
+| `simulation.py` | Turn execution, capacity checks, and deadlock handling |
 | `weather.py` | Weather providers (none, seeded random, scripted) and the weather state |
 | `transport.py` | Transport modes and how weather affects their availability and travel time |
 | `events.py` | Typed events and the dispatcher |
