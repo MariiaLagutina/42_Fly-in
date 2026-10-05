@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Literal, Protocol
 
 
 @dataclass(frozen=True)
@@ -25,6 +25,11 @@ class AgentInTransit:
     destination: str
 
 
+# Why an aircraft rerouted: weather made its route unusable (ADR-018), or
+# it was part of a structural deadlock and took a way around it (ADR-020).
+RerouteReason = Literal["weather", "deadlock"]
+
+
 @dataclass(frozen=True)
 class AgentRerouted:
     """An aircraft at `hub` replaced its remaining route with `route`, the
@@ -34,6 +39,7 @@ class AgentRerouted:
     agent_label: str
     hub: str
     route: tuple[str, ...]
+    reason: RerouteReason
 
 
 @dataclass(frozen=True)

@@ -224,6 +224,7 @@ class Pathfinder:
         end: Zone,
         weather: WeatherState,
         road_km: int = 0,
+        avoid: frozenset[str] = frozenset(),
     ) -> list[Zone] | None:
         """
         Fastest route from `start` to `end` under the given weather, ignoring
@@ -233,9 +234,10 @@ class Pathfinder:
         Lanes the weather makes unavailable are not used, and neither are
         routes that break the routing policy's consecutive-road limit.
         `road_km` is the road distance already driven since the last air
-        leg. A route never visits a hub twice. As in the cooperative search,
-        a partial route is dropped only when another one reached the same
-        hub no later and with no more road.
+        leg. A route never visits a hub twice, nor any hub named in
+        `avoid`. As in the cooperative search, a partial route is dropped
+        only when another one reached the same hub no later and with no
+        more road.
         """
         reached: dict[str, list[tuple[int, int]]] = {}
         counter = 0
@@ -259,7 +261,11 @@ class Pathfinder:
                 if not connection.connects(zone):
                     continue
                 next_zone = connection.other_end(zone)
-                if not next_zone.is_accessible() or next_zone in path:
+                if (
+                    not next_zone.is_accessible()
+                    or next_zone in path
+                    or next_zone.name in avoid
+                ):
                     continue
                 condition = weather.condition_of(connection.name())
                 if not is_available(connection, condition):

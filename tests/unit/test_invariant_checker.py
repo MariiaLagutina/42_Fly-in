@@ -194,7 +194,7 @@ def test_detects_consecutive_road_over_the_budget() -> None:
 def test_accepts_a_reroute_at_the_current_hub() -> None:
     run = fake_run(make_graph(), 1, [
         [
-            AgentRerouted(1, "D1", "start", ("gate", "goal")),
+            AgentRerouted(1, "D1", "start", ("gate", "goal"), "weather"),
             moved(1, "D1", "start", "gate"),
         ],
         [moved(2, "D1", "gate", "goal")],
@@ -207,7 +207,7 @@ def test_detects_a_reroute_in_transit() -> None:
     run = fake_run(make_graph(), 1, [
         [
             AgentInTransit(1, "D1", "start", "start-slow", "slow"),
-            AgentRerouted(1, "D1", "start", ("gate", "goal")),
+            AgentRerouted(1, "D1", "start", ("gate", "goal"), "weather"),
         ],
         [moved(2, "D1", "start", "slow")],
         [moved(3, "D1", "slow", "goal")],
@@ -218,7 +218,7 @@ def test_detects_a_reroute_in_transit() -> None:
 
 def test_detects_a_reroute_away_from_the_current_hub() -> None:
     run = fake_run(make_graph(), 1, [
-        [AgentRerouted(1, "D1", "gate", ("goal",))],
+        [AgentRerouted(1, "D1", "gate", ("goal",), "weather")],
         [moved(2, "D1", "start", "gate")],
         [moved(3, "D1", "gate", "goal")],
     ])
