@@ -1,6 +1,6 @@
 import argparse
 import sys
-from events import EventDispatcher
+from airlanes.events import EventDispatcher
 from parser import Parser, ParseError
 from airlanes.simulation.engine import Simulator
 from visualizers import AirlinesVisualizer, CapacityInfoVisualizer, Visualizer

@@ -22,7 +22,7 @@ hub (ADR-010, ADR-017).
 
 from dataclasses import dataclass
 
-from events import (
+from airlanes.events import (
     AgentInTransit,
     AgentMoved,
     AgentRerouted,

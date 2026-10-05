@@ -5,7 +5,7 @@ import math
 import pygame
 from typing import Optional, TypedDict
 
-from events import (
+from airlanes.events import (
     AgentMoved,
     AgentInTransit,
     SimulationEvent,

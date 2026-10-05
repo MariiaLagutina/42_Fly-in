@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Optional
 
-from events import EventListener, SimulationEvent
+from airlanes.events import EventListener, SimulationEvent
 from airlanes.model.graph import Graph
 
 # Shared path for assets

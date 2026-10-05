@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from events import AgentRerouted
+from airlanes.events import AgentRerouted
 from parser import Parser
 from tests.support.simulation import (
     SimulationRun,

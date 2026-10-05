@@ -12,7 +12,7 @@ from airlanes.simulation.departures import (
     select_feasible_moves,
 )
 from airlanes.simulation.deadlock import resolve_deadlock
-from events import (
+from airlanes.events import (
     AgentMoved,
     AgentInTransit,
     AgentRerouted,

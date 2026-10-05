@@ -2,7 +2,7 @@ import math
 from dataclasses import dataclass
 import pygame
 
-from events import (
+from airlanes.events import (
     AgentMoved,
     AgentInTransit,
     TurnFinished,

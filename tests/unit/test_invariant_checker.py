@@ -6,7 +6,7 @@ hand-written event streams with one known violation each.
 """
 
 from airlanes.model.drone import DroneState
-from events import (
+from airlanes.events import (
     AgentInTransit,
     AgentMoved,
     AgentRerouted,

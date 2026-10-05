@@ -14,7 +14,7 @@ from airlanes.model.drone import Drone
 from airlanes.model.graph import Graph
 from airlanes.routing.pathfinder import Pathfinder
 from airlanes.simulation.deadlock import DeadlockError, resolve_deadlock
-from events import AgentRerouted
+from airlanes.events import AgentRerouted
 from tests.support.graphs import Link, build_graph, end_hub, hub, start_hub
 from airlanes.model.transport_mode import TransportMode
 from airlanes.world.weather import WeatherCondition, WeatherState
