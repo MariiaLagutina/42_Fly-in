@@ -1,11 +1,23 @@
-PY_FILES = main.py simulation.py pathfinder.py parser.py graph.py zone.py \
-	connection.py drone.py events.py visualizers.py pygame_standard.py \
-	pygame_airlines.py pygame_common.py weather.py config.py \
-	transport.py routing_policy.py
+# Every Python file that Git tracks, or would track once added, found
+# recursively. Production sources are those outside tests/, so a module that
+# is added or moved is checked without editing this file.
+ALL_PY := $(wildcard $(shell git ls-files --cached --others \
+	--exclude-standard -- '*.py'))
+PY_FILES := $(filter-out tests/%,$(ALL_PY))
 TEST_DIR = tests
 
-.PHONY: install hooks run run-pygame run-pygame-airlines debug lint \
-	lint-strict test coverage check clean
+# Run mypy with the given options on all sources, then fail unless it
+# checked every discovered file.
+define mypy_all
+	@out=$$(uv run --locked mypy $(PY_FILES) $(TEST_DIR) $(1)); \
+	status=$$?; echo "$$out"; [ $$status -eq 0 ] || exit $$status; \
+	echo "$$out" | grep -q " in $(words $(ALL_PY)) source files" || { \
+		echo "mypy did not check all $(words $(ALL_PY)) Python files."; \
+		exit 1; }
+endef
+
+.PHONY: install hooks run run-pygame run-pygame-airlines debug check-sources \
+	lint lint-strict test coverage check clean
 
 install:
 	uv sync --locked
@@ -25,13 +37,21 @@ run-pygame-airlines:
 debug:
 	uv run --locked python3 -m pdb main.py $(MAP)
 
-lint:
-	uv run --locked flake8 $(PY_FILES) $(TEST_DIR)
-	uv run --locked mypy $(PY_FILES) $(TEST_DIR) --warn-return-any --warn-unused-ignores --ignore-missing-imports --disallow-untyped-defs --check-untyped-defs
+check-sources:
+	@test -n "$(PY_FILES)" || { \
+		echo "No production Python files found; is this a Git checkout?"; \
+		exit 1; }
+	@echo "Checking $(words $(PY_FILES)) production and \
+	$(words $(filter tests/%,$(ALL_PY))) test Python files."
 
-lint-strict:
+lint: check-sources
 	uv run --locked flake8 $(PY_FILES) $(TEST_DIR)
-	uv run --locked mypy $(PY_FILES) $(TEST_DIR) --strict
+	$(call mypy_all,--warn-return-any --warn-unused-ignores \
+		--ignore-missing-imports --disallow-untyped-defs --check-untyped-defs)
+
+lint-strict: check-sources
+	uv run --locked flake8 $(PY_FILES) $(TEST_DIR)
+	$(call mypy_all,--strict)
 
 test:
 	uv run --locked pytest
