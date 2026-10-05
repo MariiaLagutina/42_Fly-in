@@ -19,6 +19,25 @@ from events import (
 )
 
 
+class DeadlockError(RuntimeError):
+    """Aircraft block each other for good: none of them can move, and no
+    route avoids the hub it waits for, whatever the weather (ADR-020)."""
+
+    def __init__(
+        self,
+        turn_number: int,
+        aircraft: tuple[str, ...],
+        hubs: tuple[str, ...],
+    ) -> None:
+        self.turn_number = turn_number
+        self.aircraft = aircraft
+        self.hubs = hubs
+        super().__init__(
+            f"Deadlock at turn {turn_number}: {', '.join(aircraft)} wait "
+            f"for each other at {', '.join(hubs)}, and no route avoids it."
+        )
+
+
 class SimulationTurn:
     def __init__(self, turn_number: int) -> None:
         self.turn_number = turn_number
@@ -86,32 +105,10 @@ class Simulator:
                     "No valid route found between start and end zones."
                 )
 
-            drone.path = path[1:] if path else []
-            t = 0
-            for i in range(len(path) - 1):
-                z_curr, z_next = path[i], path[i + 1]
-
-                # Use the centralized pathfinder logic
-                cost = self.pathfinder._calculate_move_cost(z_curr, z_next)
-
-                if z_next != z_curr:
-                    conn = self.graph.get_connection(z_curr, z_next)
-                    if conn:
-                        if conn.distance > 0:
-                            conn_reserv[(f"{conn.name()}_dept", t)] = 1
-                        for tau in range(t, t + cost):
-                            conn_reserv[(conn.name(), tau)] = (
-                                conn_reserv.get((conn.name(), tau), 0) + 1
-                            )
-
-                t += cost
-                if not z_next.is_start and not z_next.is_end:
-                    reservations[(z_next.name, t)] = (
-                        reservations.get((z_next.name, t), 0) + 1
-                    )
-                    global_usage[z_next.name] = (
-                        global_usage.get(z_next.name, 0) + 1
-                    )
+            drone.path = path[1:]
+            self.pathfinder.reserve_path(
+                path, reservations, conn_reserv, global_usage
+            )
 
     def _path_cost(self, path: list[Zone]) -> int:
         return sum(zone.movement_cost() for zone in path[1:])
@@ -135,8 +132,8 @@ class Simulator:
         """
         A turn is processed in phases: finish existing transit, let aircraft
         at hubs replace routes that became unusable, plan departures from a
-        stable snapshot, keep the moves that fit hub capacity, then apply
-        them.
+        stable snapshot, keep the moves that fit hub capacity, apply them,
+        then look for aircraft that block each other for good.
         """
         turn = SimulationTurn(turn_number)
         self._emit(TurnStarted(turn_number))
@@ -151,12 +148,10 @@ class Simulator:
         )
         self._replan_routes(turn_number, moved_drone_ids)
 
-        planned_moves = self._plan_departures(
-            connection_usage, moved_drone_ids
-        )
+        candidates = self._plan_departures(moved_drone_ids)
 
         feasible_moves = self._select_feasible_moves(
-            planned_moves, connection_usage
+            candidates, connection_usage
         )
 
         self._apply_planned_moves(
@@ -166,6 +161,7 @@ class Simulator:
             zone_occupancy,
             moved_drone_ids,
         )
+        self._resolve_deadlock(turn_number, candidates, feasible_moves)
 
         self._emit(TurnFinished(turn_number, tuple(turn.movements)))
         self._emit_capacity_snapshot(
@@ -249,8 +245,131 @@ class Simulator:
                     drone.label,
                     drone.current_zone.name,
                     tuple(zone.name for zone in route),
+                    "weather",
                 )
             )
+
+    def _resolve_deadlock(
+        self,
+        turn_number: int,
+        candidates: list[tuple[Drone, Connection]],
+        kept: list[tuple[Drone, Connection]],
+    ) -> None:
+        """
+        Handle a structural deadlock among the aircraft that could not
+        leave this turn (ADR-020).
+
+        The first aircraft of the deadlock, in aircraft order, that has a
+        route under the current weather avoiding the hub it waits for takes
+        it. If none has one now, but one would exist with every lane open,
+        the aircraft wait: that check is not a forecast, only a probe of
+        whether the topology and the routing policy leave a way out once a
+        temporary weather restriction is gone. Otherwise no change of
+        weather can help, and the run stops with `DeadlockError`.
+        """
+        kept_ids = {drone.drone_id for drone, _connection in kept}
+        blocked = [
+            drone for drone, _connection in candidates
+            if drone.drone_id not in kept_ids
+        ]
+        deadlocked = self._deadlocked_aircraft(blocked)
+        if not deadlocked:
+            return
+
+        end_zone = self.graph.end_zone
+        assert end_zone is not None
+        for drone in deadlocked:
+            route = self._route_around(drone, end_zone, self.weather)
+            if route is not None:
+                drone.path = route
+                self._emit(
+                    AgentRerouted(
+                        turn_number,
+                        drone.label,
+                        drone.current_zone.name,
+                        tuple(zone.name for zone in route),
+                        "deadlock",
+                    )
+                )
+                return
+
+        if any(
+            self._route_around(drone, end_zone, WeatherState()) is not None
+            for drone in deadlocked
+        ):
+            return
+
+        raise DeadlockError(
+            turn_number,
+            tuple(drone.label for drone in deadlocked),
+            tuple(sorted({drone.current_zone.name for drone in deadlocked})),
+        )
+
+    def _deadlocked_aircraft(self, blocked: list[Drone]) -> list[Drone]:
+        """
+        The largest set of blocked aircraft in which everything that blocks
+        a member is itself a member: the aircraft in or flying to its full
+        destination hub, and the aircraft on its full lane. Nothing outside
+        the set can release it. An aircraft waiting for weather, for a
+        planned wait, or for an aircraft in transit is never part of it.
+        """
+        holders: dict[str, list[int]] = {}
+        on_lane: dict[str, list[int]] = {}
+        for drone in self.drones:
+            if drone.is_delivered():
+                continue
+            hub = drone.current_zone
+            if drone.state == DroneState.IN_TRANSIT:
+                assert drone.transit_target is not None
+                hub = drone.transit_target
+                if drone.transit_connection_name is not None:
+                    on_lane.setdefault(
+                        drone.transit_connection_name, []
+                    ).append(drone.drone_id)
+            holders.setdefault(hub.name, []).append(drone.drone_id)
+
+        blockers: dict[int, set[int]] = {}
+        for drone in blocked:
+            next_zone = drone.next_zone()
+            if next_zone is None:
+                continue
+            connection = self.graph.get_connection(
+                drone.current_zone, next_zone
+            )
+            assert connection is not None
+            waits_for: set[int] = set()
+            in_hub = holders.get(next_zone.name, [])
+            if len(in_hub) >= next_zone.effective_capacity():
+                waits_for.update(in_hub)
+            on_connection = on_lane.get(connection.name(), [])
+            if len(on_connection) >= connection.max_link_capacity:
+                waits_for.update(on_connection)
+            blockers[drone.drone_id] = waits_for
+
+        members = set(blockers)
+        changed = True
+        while changed:
+            changed = False
+            for drone_id in sorted(members):
+                waits_for = blockers[drone_id]
+                if not waits_for or not waits_for <= members:
+                    members.discard(drone_id)
+                    changed = True
+        return [drone for drone in blocked if drone.drone_id in members]
+
+    def _route_around(
+        self, drone: Drone, end_zone: Zone, weather: WeatherState
+    ) -> list[Zone] | None:
+        """A route to the end that avoids the hub the aircraft waits for."""
+        next_zone = drone.next_zone()
+        assert next_zone is not None
+        return self.pathfinder.find_route(
+            drone.current_zone,
+            end_zone,
+            weather,
+            drone.road_km_since_air,
+            frozenset({next_zone.name}),
+        )
 
     def _unavailable_hub_pairs(self) -> set[frozenset[str]]:
         """Pairs of hubs whose connection the current weather closes."""
@@ -320,10 +439,15 @@ class Simulator:
             moved_drone_ids.add(drone.drone_id)
 
     def _plan_departures(
-        self, connection_usage: dict[str, int], moved_drone_ids: set[int]
+        self, moved_drone_ids: set[int]
     ) -> list[tuple[Drone, Connection]]:
-        planned_moves: list[tuple[Drone, Connection]] = []
-        departed_this_turn: set[str] = set()
+        """
+        Aircraft that want to leave their hub this turn on an open lane, in
+        aircraft order. Planned waits are used up here. No lane capacity or
+        departure slot is taken yet: those go only to moves that are
+        admitted (DECISION-008).
+        """
+        candidates: list[tuple[Drone, Connection]] = []
 
         for drone in self.drones:
             if (
@@ -350,20 +474,9 @@ class Simulator:
             ):
                 continue
 
-            conn_name = connection.name()
-            used = connection_usage.get(conn_name, 0)
-            if used >= connection.max_link_capacity:
-                continue
+            candidates.append((drone, connection))
 
-            if connection.distance > 0 and conn_name in departed_this_turn:
-                continue
-
-            connection_usage[conn_name] = used + 1
-            if connection.distance > 0:
-                departed_this_turn.add(conn_name)
-            planned_moves.append((drone, connection))
-
-        return planned_moves
+        return candidates
 
     def _count_outgoing_by_zone(
         self, planned_moves: list[tuple[Drone, Connection]]
@@ -376,8 +489,73 @@ class Simulator:
 
     def _select_feasible_moves(
         self,
-        planned_moves: list[tuple[Drone, Connection]],
+        candidates: list[tuple[Drone, Connection]],
         connection_usage: dict[str, int],
+    ) -> list[tuple[Drone, Connection]]:
+        """
+        Choose this turn's departures from the candidates.
+
+        Lanes are handed out in aircraft order: lane capacity, and the one
+        departure slot of a distance lane. The moves that got a lane must
+        then fit their destination hubs. A move that holds a lane but cannot
+        enter its hub gives the lane back: it is excluded for this turn and
+        lanes are handed out again, so another aircraft can use that lane.
+        Each round excludes one move, so selection ends after at most as
+        many rounds as there are candidates. Kept moves are added to
+        `connection_usage`.
+        """
+        excluded: set[int] = set()
+        while True:
+            with_lane = self._assign_lanes(
+                candidates, connection_usage, excluded
+            )
+            kept = self._admit_to_hubs(with_lane)
+            if len(kept) == len(with_lane):
+                break
+            kept_ids = {drone.drone_id for drone, _connection in kept}
+            first_rejected = next(
+                drone
+                for drone, _connection in with_lane
+                if drone.drone_id not in kept_ids
+            )
+            excluded.add(first_rejected.drone_id)
+
+        for _drone, connection in kept:
+            conn_name = connection.name()
+            connection_usage[conn_name] = (
+                connection_usage.get(conn_name, 0) + 1
+            )
+        return kept
+
+    def _assign_lanes(
+        self,
+        candidates: list[tuple[Drone, Connection]],
+        connection_usage: dict[str, int],
+        excluded: set[int],
+    ) -> list[tuple[Drone, Connection]]:
+        """Candidates that get room on their lane, in aircraft order,
+        counting aircraft already on the lane."""
+        used = dict(connection_usage)
+        departed: set[str] = set()
+        with_lane: list[tuple[Drone, Connection]] = []
+        for drone, connection in candidates:
+            if drone.drone_id in excluded:
+                continue
+            conn_name = connection.name()
+            if used.get(conn_name, 0) >= connection.max_link_capacity:
+                continue
+            if connection.distance > 0:
+                # One departure per direction per turn (DECISION-008).
+                direction = f"{conn_name}:{drone.current_zone.name}"
+                if direction in departed:
+                    continue
+                departed.add(direction)
+            used[conn_name] = used.get(conn_name, 0) + 1
+            with_lane.append((drone, connection))
+        return with_lane
+
+    def _admit_to_hubs(
+        self, moves: list[tuple[Drone, Connection]]
     ) -> list[tuple[Drone, Connection]]:
         """
         Keep only the moves whose destination still has room after the turn.
@@ -389,7 +567,7 @@ class Simulator:
         no move is rejected. The selection only shrinks, so it terminates.
         """
         load = self._count_hub_load()
-        selected = planned_moves
+        selected = moves
 
         while True:
             leaving = self._count_outgoing_by_zone(selected)
@@ -412,19 +590,8 @@ class Simulator:
                 kept.append((drone, connection))
 
             if len(kept) == len(selected):
-                break
+                return kept
             selected = kept
-
-        kept_ids = {drone.drone_id for drone, _connection in selected}
-        for drone, connection in planned_moves:
-            conn_name = connection.name()
-            if (
-                drone.drone_id not in kept_ids
-                and connection_usage.get(conn_name, 0) > 0
-            ):
-                connection_usage[conn_name] -= 1
-
-        return selected
 
     def _count_hub_load(self) -> dict[str, int]:
         """Aircraft in each hub, plus aircraft flying towards it."""

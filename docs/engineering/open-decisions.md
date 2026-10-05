@@ -21,8 +21,8 @@ numbers used before the plan was split.
 | [DECISION-004](#decision-004) | What makes a hub or route unsafe, and where does a weather diversion go? | `DECIDED` | — |
 | [DECISION-005](#decision-005) | How does weather emergency overflow work? | `DECIDED` (not needed) | — |
 | [DECISION-006](#decision-006) | How does routing policy compare waiting, rerouting, and diverting? | `DECIDED` (minimal policy) | — |
-| [DECISION-007](#decision-007) | When is revisiting a hub legitimate? | `OPEN` | PR #10 |
-| [DECISION-008](#decision-008) | Does the one-departure-per-turn rule apply per lane or per direction? | `OPEN` | [BUG-003](bug-triage.md#bug-003) variant A |
+| [DECISION-007](#decision-007) | When is revisiting a hub legitimate? | `DECIDED` | — |
+| [DECISION-008](#decision-008) | Does the one-departure-per-turn rule apply per lane or per direction? | `DECIDED` (per direction) | — |
 | [DECISION-009](#decision-009) | Can two connections, such as air and road, join the same pair of hubs? | `OPEN` | — |
 | [DECISION-010](#decision-010) | Should an aircraft move to an intermediate hub when no route to its destination is available? | `OPEN` | — |
 
@@ -336,8 +336,10 @@ In short:
 - No delay estimate is needed: a usable route is never compared with
   alternatives, and an unusable one is replaced by whatever route is
   available now.
-- **Still open:** a trigger for aircraft that make no progress because of
-  capacity moves to PR #10, together with deadlock handling. Whether route
+- **No-progress trigger:** not added. Aircraft blocked by capacity are
+  handled by deadlock detection instead
+  ([ADR-020](decisions.md#adr-020), PR #10).
+- **Still open:** whether route
   cost should weigh the current weather beyond availability (for example,
   preferring a route without rain) is part of PR #11
   ([DECISION-001](#decision-001)).
@@ -381,8 +383,26 @@ may not know that.
 
 ### When is revisiting a hub legitimate?
 
-- **Status:** `OPEN`
-- **To be decided in:** PR #10.
+- **Status:** `DECIDED`
+- **Decided in:** [ADR-020](decisions.md#adr-020), PR #10.
+
+In short:
+
+- **Within one route, never.** A planned route does not return to a hub it
+  has left; an aircraft waits in place instead. Every route search uses
+  simple paths, so no loop can reset the consecutive-road budget.
+- **Across decisions, yes.** A weather reroute, a way around a deadlock, or
+  backtracking plans a simple route from the current hub, which may lead
+  back to a hub visited earlier.
+- **No oscillation limit.** The PR #10 audit found no run that failed to
+  finish because of repeated reroutes, so none is added.
+- **Evidence.** Three bundled maps change routes with the same turn
+  counts. On 10,000 random maps without weather, the branch with this rule
+  finishes 186 runs sooner and 8 runs one turn later than the same branch
+  without it. Measured on the PR #10 code before and after the rule; the
+  later deadlock handling never acts on these runs.
+
+The text below is the question as it was recorded before the decision.
 
 **Context.** [ADR-014](decisions.md#adr-014) forbids cycles used as a way of
 waiting, and [ADR-011](decisions.md#adr-011) allows returning to a hub when the
@@ -421,8 +441,25 @@ state changes (backtracking, weather diversion). Between the two:
 
 ### Does the one-departure-per-turn rule apply per lane or per direction?
 
-- **Status:** `OPEN`
-- **To be decided in:** PR #10, with [BUG-003](bug-triage.md#bug-003).
+- **Status:** `DECIDED` (per direction)
+- **Decided in:** [ADR-019](decisions.md#adr-019), PR #10.
+
+In short:
+
+- **Per direction.** A distance lane allows one departure per direction per
+  turn, in the planner and in the executor. Both directions still count
+  towards the lane's capacity, so two aircraft can swap full hubs only
+  when the lane has room for both.
+- **Only admitted moves take a lane.** A departure gets lane capacity and
+  its departure slot only if it also fits its destination hub. A rejected
+  move takes nothing (BUG-003 variant B).
+- **What the rule models.** Takeoff separation within one direction.
+  Opposite directions do not share it.
+- **Evidence.** Bundled map output is unchanged. Without any rule, the
+  bonus maps would change (Germany from 14 to 9 printed turns), which is a
+  larger change than this decision needs.
+
+The text below is the question as it was recorded before the decision.
 
 **Context.** The executor and the planner allow one departure per turn on each
 distance lane, regardless of direction, in addition to `max_link_capacity`.

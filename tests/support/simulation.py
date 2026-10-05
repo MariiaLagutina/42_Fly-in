@@ -10,6 +10,11 @@ capacities are checked at the end of each turn, after aircraft that leave a
 hub have freed their place; a lane is used by every aircraft that departs on
 it, crosses it, or arrives over it during the turn.
 
+Capacity rules of the project checked on top (ADR-008, ADR-019): a hub's
+load, the aircraft in it plus the aircraft flying towards it, never exceeds
+its capacity, and a distance lane has at most one departure per direction
+per turn.
+
 Routing rules checked on top: no aircraft drives more consecutive road than
 the routing policy allows, and an aircraft only reroutes while it waits at a
 hub (ADR-010, ADR-017).
@@ -129,6 +134,7 @@ class _InvariantChecker:
         self.turn = 0
         self.moved_this_turn: set[str] = set()
         self.lane_use: dict[str, int] = {}
+        self.departures: set[tuple[str, str]] = set()
         self.peak_occupancy: dict[str, int] = {}
         self.road_km: dict[str, int] = {label: 0 for label in self.positions}
         self.max_road_km = run.simulator.policy.max_consecutive_road_km
@@ -160,6 +166,7 @@ class _InvariantChecker:
         self.turn = turn
         self.moved_this_turn = set()
         self.lane_use = {}
+        self.departures = set()
         for position in self.positions.values():
             if isinstance(position, _InTransit):
                 self._use_lane(position.connection)
@@ -203,6 +210,7 @@ class _InvariantChecker:
         if event.connection in self.closed_lanes:
             self.fail(f"{label} departed on closed lane {event.connection}")
         self._use_lane(event.connection)
+        self._take_off(label, event.connection, event.origin)
         self._drive(label, event.connection)
         self.positions[label] = _InTransit(
             event.connection, event.destination, self.turn
@@ -263,7 +271,17 @@ class _InvariantChecker:
         if connection.distance == 0 and destination.movement_cost() > 1:
             self.fail(f"{label} entered {destination.name} in one turn")
         self._use_lane(connection.name())
+        self._take_off(label, connection.name(), origin.name)
         self._drive(label, connection.name())
+
+    def _take_off(self, label: str, lane: str, origin: str) -> None:
+        """A distance lane allows one departure per direction per turn."""
+        if self.connections[lane].distance == 0:
+            return
+        if (lane, origin) in self.departures:
+            self.fail(f"{label} was a second departure from {origin} on "
+                      f"lane {lane} this turn")
+        self.departures.add((lane, origin))
 
     def _drive(self, label: str, lane: str) -> None:
         """Track consecutive road distance; an air leg resets it."""
@@ -292,9 +310,13 @@ class _InvariantChecker:
 
     def _check_capacities(self) -> None:
         occupancy: dict[str, int] = {}
+        incoming: dict[str, int] = {}
         for position in self.positions.values():
             if isinstance(position, str):
                 occupancy[position] = occupancy.get(position, 0) + 1
+            else:
+                name = position.destination
+                incoming[name] = incoming.get(name, 0) + 1
         for name, count in occupancy.items():
             self.peak_occupancy[name] = max(
                 self.peak_occupancy.get(name, 0), count
@@ -303,6 +325,14 @@ class _InvariantChecker:
             assert zone is not None
             if count > zone.effective_capacity():
                 self.fail(f"hub {name} holds {count}, capacity "
+                          f"{zone.effective_capacity()}")
+        for name, flying in incoming.items():
+            zone = self.graph.get_zone(name)
+            assert zone is not None
+            held = occupancy.get(name, 0)
+            if held <= zone.effective_capacity() < held + flying:
+                self.fail(f"hub {name} holds {held} and {flying} more are "
+                          f"flying to it, capacity "
                           f"{zone.effective_capacity()}")
         for name, count in self.lane_use.items():
             capacity = self.connections[name].max_link_capacity
@@ -329,3 +359,30 @@ class _InvariantChecker:
                 self.violations.append(
                     f"{drone.label} final state is not delivered at end"
                 )
+
+
+def planned_delivery_turns(
+    graph: Graph, nb_aircraft: int
+) -> dict[str, int]:
+    """Plan routes the way the simulator does before its first turn and
+    return the turn on which each aircraft's plan delivers it."""
+    simulator = Simulator(graph, nb_aircraft)
+    simulator._assign_paths()
+    assert graph.start_zone is not None
+    planned: dict[str, int] = {}
+    for drone in simulator.drones:
+        turn, here = 0, graph.start_zone
+        for zone in drone.path:
+            turn += simulator.pathfinder._calculate_move_cost(here, zone)
+            here = zone
+        planned[drone.label] = turn
+    return planned
+
+
+def delivery_turns(run: SimulationRun) -> dict[str, int]:
+    """The turn on which each aircraft was delivered."""
+    return {
+        event.agent_label: event.turn_number
+        for event in run.events
+        if isinstance(event, AgentMoved) and event.delivered
+    }

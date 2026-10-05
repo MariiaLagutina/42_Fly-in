@@ -11,10 +11,13 @@ import pytest
 
 from events import AgentInTransit, AgentRerouted, WeatherChanged
 from graph import Graph
+from simulation import DeadlockError
 from tests.support.graphs import Link, build_graph, end_hub, hub, start_hub
 from tests.support.simulation import (
     check_invariants,
+    delivery_turns,
     peak_hub_occupancy,
+    planned_delivery_turns,
     SimulationRun,
     run_simulation,
 )
@@ -310,7 +313,9 @@ def test_closed_first_leg_on_turn_one_causes_a_reroute() -> None:
     run = run_simulation(two_air_routes(), 1, weather)
 
     assert check_invariants(run) == []
-    assert reroutes(run) == [AgentRerouted(1, "D1", "start", ("b", "goal"))]
+    assert reroutes(run) == [
+        AgentRerouted(1, "D1", "start", ("b", "goal"), "weather")
+    ]
     assert departure_turns(run)[0] == 1
 
 
@@ -334,7 +339,9 @@ def test_unusable_later_leg_causes_a_reroute_before_departure() -> None:
     run = run_simulation(two_air_routes(), 1, weather)
 
     assert check_invariants(run) == []
-    assert reroutes(run) == [AgentRerouted(1, "D1", "start", ("b", "goal"))]
+    assert reroutes(run) == [
+        AgentRerouted(1, "D1", "start", ("b", "goal"), "weather")
+    ]
 
 
 def test_aircraft_in_transit_finishes_its_leg_before_rerouting() -> None:
@@ -386,7 +393,9 @@ def test_road_becomes_the_fallback_when_air_closes() -> None:
     run = run_simulation(air_with_road_fallback(150), 1, weather)
 
     assert check_invariants(run) == []
-    assert reroutes(run) == [AgentRerouted(1, "D1", "start", ("r", "goal"))]
+    assert reroutes(run) == [
+        AgentRerouted(1, "D1", "start", ("r", "goal"), "weather")
+    ]
 
 
 def test_road_over_the_budget_is_not_a_fallback() -> None:
@@ -441,7 +450,9 @@ def test_fresh_road_budget_allows_the_same_detour() -> None:
     run = run_simulation(graph, 1, weather)
 
     assert check_invariants(run) == []
-    assert reroutes(run) == [AgentRerouted(1, "D1", "x", ("y", "goal"))]
+    assert reroutes(run) == [
+        AgentRerouted(1, "D1", "x", ("y", "goal"), "weather")
+    ]
 
 
 # --- Regression: hub capacity (BUG-001, BUG-002) ----------------------------
@@ -502,3 +513,269 @@ def test_restricted_hub_with_room_for_two_is_not_overfilled() -> None:
     run = run_simulation(graph, 6)
 
     assert peak_hub_occupancy(run)["slow"] <= 2
+
+
+# --- Regression: departure arbitration (BUG-003 variant B) ------------------
+# A lane is handed out only to a move that can also enter its destination
+# hub. Before the fix, an aircraft that could not enter its hub still took
+# the lane first, every turn, and an aircraft that could leave never got it.
+# Both runs hung until the 10,000-turn limit.
+
+
+def test_rejected_departure_does_not_take_the_departure_slot() -> None:
+    """Canonical BUG-003 variant B. D10 in `S` waits for `h0`, which D11
+    occupies; D11 in `h0` could leave for `S`, but D10 took the lane's one
+    departure slot first on every turn."""
+    graph = build_graph(
+        [
+            start_hub("S"),
+            end_hub("E"),
+            hub("h0", ZoneType.PRIORITY),
+            hub("h1", ZoneType.RESTRICTED, capacity=2),
+            hub("h2"),
+        ],
+        [
+            Link("h1", "E", distance=450),
+            Link("h2", "h0", distance=150, mode=ROAD),
+            Link("S", "h2", capacity=2, distance=1200),
+            Link("E", "S", capacity=2, distance=700),
+            Link("S", "h0", capacity=3, distance=450),
+        ],
+    )
+
+    run = run_simulation(graph, 12)
+
+    assert check_invariants(run) == []
+
+
+def test_rejected_departure_does_not_take_lane_capacity() -> None:
+    """The same mechanism through lane capacity. After a reroute, D3 in
+    `h2` waits for `h4`, which D5 occupies, and D5 in `h4` wants `h2`, which
+    has room. Lane `h4-h2` holds one aircraft; D3 used to take it first."""
+    graph = build_graph(
+        [
+            start_hub("S"),
+            end_hub("E"),
+            hub("h1", ZoneType.PRIORITY),
+            hub("h2", capacity=3),
+            hub("h3", ZoneType.PRIORITY, capacity=3),
+            hub("h4"),
+            hub("h5"),
+        ],
+        [
+            Link("E", "h5"),
+            Link("S", "h4"),
+            Link("h1", "h5"),
+            Link("h4", "h2"),
+            Link("h5", "h4"),
+            Link("h3", "h5"),
+            Link("h2", "h3", capacity=2),
+            Link("h3", "h1"),
+            Link("S", "h2"),
+        ],
+    )
+    weather = ScriptedWeather({3: {"h3-h5": STORM}, 7: {"h3-h5": CLEAR}})
+
+    run = run_simulation(graph, 5, weather)
+
+    assert check_invariants(run) == []
+
+
+# --- One capacity model for planner and executor (ADR-019) ------------------
+# The planner holds a hub from the turn a leg towards it departs, holds a
+# lane on every turn of a leg, and allows one departure per direction per
+# turn on a distance lane, exactly as the executor does. Without weather,
+# plans therefore execute exactly. Before, the planner booked a hub only on
+# the arrival turn, so the executor delayed planned departures, the planned
+# meeting points shifted, and some runs hung (BUG-003).
+
+
+def canonical_variant_a() -> Graph:
+    """Canonical BUG-003 variant A. The old plans parked aircraft in the
+    priority hub `h0` and brought them back, so D9 in `h2` and D11 in `h4`
+    ended up waiting for each other's hub on lane `h4-h2`."""
+    return build_graph(
+        [
+            start_hub("S"),
+            end_hub("E"),
+            hub("h0", ZoneType.PRIORITY),
+            hub("h1", ZoneType.BLOCKED),
+            hub("h2"),
+            hub("h3", ZoneType.RESTRICTED, capacity=2),
+            hub("h4"),
+        ],
+        [
+            Link("h2", "h0", capacity=3, distance=80, mode=ROAD),
+            Link("h1", "E", capacity=3, distance=700),
+            Link("h4", "h2", capacity=3, distance=150, mode=ROAD),
+            Link("h4", "h3", capacity=3, distance=700),
+            Link("h3", "S", capacity=2, distance=700),
+            Link("S", "E", distance=450),
+        ],
+    )
+
+
+def restricted_hub_queue() -> Graph:
+    """Five aircraft through a one-slot restricted hub."""
+    return build_graph(
+        [start_hub(), hub("slow", ZoneType.RESTRICTED), end_hub()],
+        [Link("start", "slow", capacity=2), Link("slow", "goal")],
+    )
+
+
+def zero_distance_lane_into_restricted_hub() -> Graph:
+    """A two-turn lane without a distance: the planner used to check the
+    lane only on the departure turn."""
+    return build_graph(
+        [
+            start_hub("S"),
+            end_hub("E"),
+            hub("h0", ZoneType.PRIORITY),
+            hub("h1", capacity=3),
+            hub("h2", ZoneType.PRIORITY),
+            hub("h3", ZoneType.RESTRICTED, capacity=3),
+            hub("h4", ZoneType.BLOCKED),
+        ],
+        [
+            Link("h4", "h3", capacity=3),
+            Link("E", "h2", capacity=2),
+            Link("E", "h0"),
+            Link("h2", "h1"),
+            Link("E", "h3"),
+            Link("h0", "h1"),
+            Link("S", "h3", capacity=2),
+            Link("h3", "h1", capacity=3),
+        ],
+    )
+
+
+@pytest.mark.parametrize(
+    ("graph", "nb_aircraft"),
+    [
+        pytest.param(canonical_variant_a(), 12, id="bug-003-variant-a"),
+        pytest.param(restricted_hub_queue(), 5, id="restricted-hub-queue"),
+        pytest.param(
+            zero_distance_lane_into_restricted_hub(), 10,
+            id="zero-distance-lane",
+        ),
+    ],
+)
+def test_aircraft_are_delivered_when_planned(
+    graph: Graph, nb_aircraft: int
+) -> None:
+    planned = planned_delivery_turns(graph, nb_aircraft)
+
+    run = run_simulation(graph, nb_aircraft)
+
+    assert check_invariants(run) == []
+    assert delivery_turns(run) == planned
+
+
+# --- Waiting happens in place (ADR-014, DECISION-007) -----------------------
+
+
+def test_aircraft_waits_in_place_instead_of_a_detour() -> None:
+    """With one lane to the goal, the third aircraft used to fly to the
+    priority hub `p` and back to pass time. It now waits at the start and
+    is delivered on the same turn."""
+    graph = build_graph(
+        [start_hub(), hub("p", ZoneType.PRIORITY), end_hub()],
+        [Link("start", "goal"), Link("start", "p")],
+    )
+
+    run = run_simulation(graph, 3)
+
+    assert check_invariants(run) == []
+    assert run.visited_zones("D3") == ["goal"]
+    assert delivery_turns(run) == {"D1": 1, "D2": 2, "D3": 3}
+
+
+# --- Structural deadlocks (ADR-020, BUG-003) --------------------------------
+# Aircraft that block each other for good are detected on the turn it
+# happens. One of them takes a way around if there is one now; if there is
+# one only once the weather clears, they wait; otherwise the run stops with
+# DeadlockError instead of running into the 10,000-turn limit.
+
+
+def deadlock_reroutes(run: SimulationRun) -> list[AgentRerouted]:
+    return [e for e in reroutes(run) if e.reason == "deadlock"]
+
+
+def lane_for_one_between_full_hubs() -> Graph:
+    """`h2` and `h3` hold one aircraft each and share a lane for one."""
+    return build_graph(
+        [start_hub("S"), end_hub("E"), hub("h2"),
+         hub("h3", ZoneType.RESTRICTED)],
+        [
+            Link("h3", "h2"),
+            Link("h3", "S"),
+            Link("h2", "E"),
+            Link("E", "h3"),
+        ],
+    )
+
+
+def test_deadlock_after_reroutes_is_resolved_by_a_way_around() -> None:
+    """Weather reroutes D2 into `h2` heading for `h3`, while D3 in `h3`
+    heads for `h2`: they can never swap over a lane for one. The way around
+    for D2, lane `h2-E`, is closed on turn 6, so the aircraft wait for the
+    weather; on turn 7 it opens and D2 takes it."""
+    weather = ScriptedWeather({
+        1: {"E-h3": STORM}, 4: {"E-h3": CLEAR},
+        6: {"h2-E": STORM}, 7: {"h2-E": CLEAR},
+    })
+
+    run = run_simulation(lane_for_one_between_full_hubs(), 3, weather)
+
+    assert check_invariants(run) == []
+    assert deadlock_reroutes(run) == [
+        AgentRerouted(7, "D2", "h2", ("E",), "deadlock")
+    ]
+
+
+def road_budget_trap() -> Graph:
+    """Roads around the air lane `h0-h2` are too long to drive after the
+    road an aircraft has already driven."""
+    return build_graph(
+        [start_hub("S"), end_hub("E"), hub("h0"), hub("h1"), hub("h2")],
+        [
+            Link("h0", "S", capacity=3, distance=400, mode=ROAD),
+            Link("h2", "h1", capacity=3, distance=250, mode=ROAD),
+            Link("E", "h2", capacity=3, distance=300, mode=ROAD),
+            Link("h0", "E", distance=450, mode=ROAD),
+            Link("S", "h1", distance=400, mode=ROAD),
+            Link("E", "h1"),
+            Link("h0", "h2"),
+        ],
+    )
+
+
+def test_deadlock_without_a_way_around_stops_the_run() -> None:
+    """Snow closes D1's lane `E-h1`, so D1 reroutes through `h2` and `h0`
+    while D2 waits in `h0` for `h2`. Each holds the hub the other needs, the
+    lane between them holds one aircraft, and every way around breaks the
+    700 km road budget, whatever the weather."""
+    weather = ScriptedWeather({4: {"E-h1": WeatherCondition.SNOW}})
+
+    with pytest.raises(DeadlockError) as error:
+        run_simulation(road_budget_trap(), 2, weather)
+
+    assert error.value.turn_number == 8
+    assert error.value.aircraft == ("D1", "D2")
+    assert error.value.hubs == ("h0", "h2")
+
+
+def test_waiting_for_weather_is_not_a_deadlock() -> None:
+    """D1 waits in `a` for its closed lane and D2 waits for `a`: a chain of
+    waiting that ends at the weather, not a deadlock."""
+    graph = build_graph(
+        [start_hub(), hub("a"), end_hub()],
+        [Link("start", "a"), Link("a", "goal", distance=450)],
+    )
+    weather = ScriptedWeather({2: {"a-goal": STORM}, 30: {"a-goal": CLEAR}})
+
+    run = run_simulation(graph, 2, weather)
+
+    assert check_invariants(run) == []
+    assert deadlock_reroutes(run) == []
+    assert run.turn_count > 30
