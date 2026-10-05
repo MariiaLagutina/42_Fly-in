@@ -6,8 +6,8 @@ Weather never changes a connection's mode or its physical distance, and it
 cannot create a connection: these rules only judge connections that the map
 defines.
 
-The numeric weather penalties are provisional. Their final semantics belong
-to DECISION-001 (docs/engineering/open-decisions.md).
+Travel time under the current weather is also the physical cost that
+routing compares (ADR-021); routing adds no weather penalties of its own.
 """
 
 import math

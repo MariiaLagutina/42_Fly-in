@@ -9,8 +9,8 @@ class SimulationConfig:
     CAR_SPEED_KMH: float = 100.0
     AIRPLANE_SPEED_KMH: float = 400.0
 
-    # Weather penalties. Provisional until DECISION-001 settles travel-time
-    # semantics; applied by transport.travel_time.
+    # Extra turns on a road leg in bad weather, and the tailwind divisor for
+    # air distance (DECISION-001); applied by transport.travel_time.
     WEATHER_PENALTY_SEVERE: int = 2
     WEATHER_PENALTY_MILD: int = 1
     TAILWIND_DIST_DIVISOR: float = 2.0

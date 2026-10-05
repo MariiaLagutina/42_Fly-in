@@ -6,6 +6,8 @@ search methods (`find_path_bfs`, `find_path_dijkstra`, `find_multiple_paths`,
 `heuristic`) are intentionally not covered.
 """
 
+import math
+
 from graph import Graph
 from pathfinder import Pathfinder
 from routing_policy import RoutingPolicy
@@ -163,6 +165,57 @@ def test_find_route_keeps_roads_open_in_a_storm() -> None:
     assert find(graph, WeatherState({
         "start-goal": WeatherCondition.STORM
     })) == ["goal"]
+
+
+# --- route_travel_time: a route's travel time under weather (ADR-021) -----
+
+
+def road_then_air() -> Graph:
+    """start -> a by 150 km of road, a -> goal by 900 km of air."""
+    return build_graph(
+        [start_hub(), hub("a"), end_hub()],
+        [
+            Link("start", "a", distance=150, mode=ROAD),
+            Link("a", "goal", distance=900),
+        ],
+    )
+
+
+def travel_time_of(
+    graph: Graph, route: list[str], weather: WeatherState | None = None
+) -> float:
+    assert graph.start_zone is not None
+    return Pathfinder(graph).route_travel_time(
+        graph.start_zone,
+        [graph.zones[name] for name in route],
+        weather or WeatherState(),
+    )
+
+
+def test_route_travel_time_adds_the_legs_under_the_weather() -> None:
+    """Road 2 turns and air 3 turns in clear weather; a storm adds two turns
+    to the road, a tailwind halves the air distance."""
+    graph = road_then_air()
+
+    assert travel_time_of(graph, ["a", "goal"]) == 5
+    assert travel_time_of(graph, ["a", "goal"], WeatherState({
+        "start-a": WeatherCondition.STORM,
+        "a-goal": WeatherCondition.TAILWIND,
+    })) == 6
+
+
+def test_route_travel_time_ignores_planned_waits() -> None:
+    graph = road_then_air()
+
+    assert travel_time_of(graph, ["start", "a", "a", "goal"]) == 5
+
+
+def test_route_travel_time_of_a_closed_route_is_infinite() -> None:
+    graph = road_then_air()
+
+    assert travel_time_of(graph, ["a", "goal"], WeatherState({
+        "a-goal": WeatherCondition.SNOW
+    })) == math.inf
 
 
 # --- consecutive-road budget (ADR-017) -------------------------------------

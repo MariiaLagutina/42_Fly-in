@@ -179,8 +179,8 @@ def test_missing_route_fails_before_the_first_turn(graph: Graph) -> None:
 # --- Distance-based travel time and weather ---------------------------------
 # Road legs travel at 100 km/h, air legs at 400 km/h, rounded up to whole
 # turns; the mode comes from the map. Weather comes from `ScriptedWeather`,
-# so these runs are deterministic. Weather penalties are provisional
-# (DECISION-001) and are asserted only as "slower".
+# so these runs are deterministic. Weather travel times follow the transport
+# rules (DECISION-001): rain adds one turn to a road leg, storm and snow two.
 
 
 @pytest.mark.parametrize(
@@ -225,6 +225,8 @@ def test_aircraft_waits_while_its_air_lane_is_closed() -> None:
 
 
 def test_road_stays_open_but_slower_in_a_storm() -> None:
+    """150 km of road takes 2 turns, plus 2 in a storm. With no other route
+    the aircraft reconsiders, keeps its route, and drives."""
     graph = build_graph(
         [start_hub(), end_hub()],
         [Link("start", "goal", distance=150, mode=ROAD)],
@@ -235,7 +237,8 @@ def test_road_stays_open_but_slower_in_a_storm() -> None:
 
     assert check_invariants(run) == []
     assert departure_turns(run) == [1]
-    assert run.turn_count > 2
+    assert not any(isinstance(e, AgentRerouted) for e in run.events)
+    assert run.turn_count == 4
 
 
 def test_weather_events_report_each_change_once() -> None:
@@ -278,11 +281,12 @@ def test_weather_cannot_describe_a_connection_the_map_lacks() -> None:
         run_simulation(graph, 1, weather)
 
 
-# --- Dynamic replanning (ADR-018) -------------------------------------------
-# An aircraft at a hub keeps its route while it is usable, reroutes when the
-# weather makes it unusable, and waits when no route is available. Weather
-# comes from `ScriptedWeather`. Routes are asserted only where a single
-# alternative exists.
+# --- Dynamic replanning (ADR-018, ADR-021) ----------------------------------
+# An aircraft at a hub reconsiders its route when the weather makes it slower
+# than in clear weather, a closed leg being infinitely slow. It switches only
+# to a strictly faster route, and waits when a closed route has no
+# alternative. Weather comes from `ScriptedWeather`. Routes are asserted only
+# where a single alternative exists.
 
 STORM = WeatherCondition.STORM
 CLEAR = WeatherCondition.CLEAR
@@ -361,7 +365,7 @@ def test_aircraft_in_transit_finishes_its_leg_before_rerouting() -> None:
 
 def test_usable_route_is_kept_when_another_becomes_faster() -> None:
     """A tailwind makes the route via `b` faster than the planned one, but
-    the planned route is still usable, so the aircraft keeps it."""
+    the planned route is not slowed, so the aircraft does not reconsider."""
     graph = two_air_routes(via_a=1200, via_b=1600)
     weather = ScriptedWeather({1: {
         "start-b": WeatherCondition.TAILWIND,
@@ -373,6 +377,98 @@ def test_usable_route_is_kept_when_another_becomes_faster() -> None:
     assert check_invariants(run) == []
     assert reroutes(run) == []
     assert run.visited_zones("D1") == ["a", "goal"]
+
+
+RAIN = WeatherCondition.RAIN
+TAILWIND = WeatherCondition.TAILWIND
+
+
+def road_or_air() -> Graph:
+    """start -> a by 150 km of road (2 turns), then 300 km of air (1 turn),
+    is faster than start -> b by 900 km of air (3 turns), then 300 km of
+    air (1 turn)."""
+    return build_graph(
+        [start_hub(), hub("a"), hub("b"), end_hub()],
+        [
+            Link("start", "a", distance=150, mode=ROAD),
+            Link("a", "goal", distance=300),
+            Link("start", "b", distance=900),
+            Link("b", "goal", distance=300),
+        ],
+    )
+
+
+def test_slowed_road_is_replaced_by_a_faster_air_route() -> None:
+    """A storm makes the road route 5 turns, the air route takes 4."""
+    weather = ScriptedWeather({1: {"start-a": STORM}})
+
+    run = run_simulation(road_or_air(), 1, weather)
+
+    assert check_invariants(run) == []
+    assert reroutes(run) == [
+        AgentRerouted(1, "D1", "start", ("b", "goal"), "weather")
+    ]
+    assert delivery_turns(run) == {"D1": 4}
+
+
+def test_slowed_route_is_kept_on_a_tie() -> None:
+    """Rain makes the road route 4 turns, as long as the air route."""
+    weather = ScriptedWeather({1: {"start-a": RAIN}})
+
+    run = run_simulation(road_or_air(), 1, weather)
+
+    assert check_invariants(run) == []
+    assert reroutes(run) == []
+    assert run.visited_zones("D1") == ["a", "goal"]
+
+
+def test_slowed_later_leg_is_reconsidered_before_departure() -> None:
+    """The storm is on the second leg of the planned route. The current
+    weather is costed for the whole route, so the aircraft switches before
+    it leaves: road 2 + air 3 = 5 turns against air 3 + air 1 = 4."""
+    graph = build_graph(
+        [start_hub(), hub("a"), hub("b"), end_hub()],
+        [
+            Link("start", "a", distance=300),
+            Link("a", "goal", distance=150, mode=ROAD),
+            Link("start", "b", distance=300),
+            Link("b", "goal", distance=1000),
+        ],
+    )
+    weather = ScriptedWeather({1: {"a-goal": STORM}})
+
+    run = run_simulation(graph, 1, weather)
+
+    assert check_invariants(run) == []
+    assert reroutes(run) == [
+        AgentRerouted(1, "D1", "start", ("b", "goal"), "weather")
+    ]
+
+
+def test_tailwind_counts_once_a_slowdown_triggers_reconsideration() -> None:
+    """Rain alone would tie (4 against 4 turns), but the search uses the
+    whole current weather: a tailwind makes the air route 3 turns."""
+    weather = ScriptedWeather({1: {"start-a": RAIN, "start-b": TAILWIND}})
+
+    run = run_simulation(road_or_air(), 1, weather)
+
+    assert check_invariants(run) == []
+    assert reroutes(run) == [
+        AgentRerouted(1, "D1", "start", ("b", "goal"), "weather")
+    ]
+    assert delivery_turns(run) == {"D1": 3}
+
+
+def test_travel_time_is_fixed_when_the_leg_starts() -> None:
+    """The storm clears on turn 2, but a road leg started in it keeps the
+    storm's travel time, so switching to the air route on turn 1 is not a
+    bet on the weather: 4 turns instead of 5."""
+    weather = ScriptedWeather({1: {"start-a": STORM}, 2: {"start-a": CLEAR}})
+
+    run = run_simulation(road_or_air(), 1, weather)
+
+    assert check_invariants(run) == []
+    assert delivery_turns(run) == {"D1": 4}
 
 
 def air_with_road_fallback(road_km: int) -> Graph:
