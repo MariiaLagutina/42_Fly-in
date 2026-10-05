@@ -11,7 +11,7 @@ import pytest
 
 from events import AgentInTransit, AgentRerouted, WeatherChanged
 from airlanes.model.graph import Graph
-from airlanes.simulation.engine import DeadlockError
+from airlanes.simulation.deadlock import DeadlockError
 from tests.support.graphs import Link, build_graph, end_hub, hub, start_hub
 from tests.support.simulation import (
     check_invariants,
