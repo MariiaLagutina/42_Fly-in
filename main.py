@@ -3,7 +3,11 @@ import sys
 from airlanes.events import EventDispatcher
 from airlanes.mapfile import Parser, ParseError
 from airlanes.simulation.engine import Simulator
-from visualizers import AirlinesVisualizer, CapacityInfoVisualizer, Visualizer
+from airlanes.output.text import (
+    AirlinesVisualizer,
+    CapacityInfoVisualizer,
+    Visualizer,
+)
 from airlanes.world.weather import RandomWeather
 
 
