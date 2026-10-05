@@ -24,11 +24,12 @@ Accepted decisions are recorded as ADRs in [decisions.md](decisions.md):
 | [ADR-018](decisions.md#adr-018) | Aircraft reroute only when weather makes their route unusable |
 | [ADR-019](decisions.md#adr-019) | One capacity model; committed claims are the only live reservations |
 | [ADR-020](decisions.md#adr-020) | Structural deadlocks are detected each turn and resolved or reported |
+| [ADR-021](decisions.md#adr-021) | Weather that slows a route triggers its reconsideration; route cost is the transport travel time |
 
 ADR-015 replaces the parts of ADR-011 and ADR-013 about unsafe hubs, weather
 diversion, and emergency hub capacity. ADR-019 replaces the live reservations
-of ADR-013, and ADR-020 the no-progress threshold of ADR-011. The sections
-below already reflect them.
+of ADR-013, and ADR-020 the no-progress threshold of ADR-011. ADR-021
+replaces the trigger of ADR-018. The sections below already reflect them.
 
 Questions that still need a decision are listed in
 [Open questions](#open-questions) and tracked in
@@ -208,6 +209,33 @@ from 95.8 to 94.6 and `medium/03_priority_puzzle` from 10.0 to 10.1.
   route made 2,609 of 20,000 scripted runs wait forever; none was taken for
   a deadlock.
 
+### Since Weather-aware cost
+
+- **Reconsidering on a slowdown.** At a decision point, an aircraft
+  reconsiders its route when the current weather makes the remaining route
+  slower than in clear weather; a closed leg counts as infinitely slow
+  ([ADR-021](decisions.md#adr-021)). It replaces an open route only by a
+  strictly faster one under the same weather; a tie keeps it. A closed route
+  is replaced as before.
+- **One source of route cost.** `Pathfinder.route_travel_time` adds up
+  `transport.travel_time` over a route's legs under a weather state, and
+  returns infinity when `transport.is_available` closes one of them. The
+  route search uses the same travel times.
+- **Clear-weather initial plan.** The plan made before the first turn
+  stays a deterministic clear-weather baseline. Turn-1 weather reaches every
+  aircraft at its first decision point, before any departure.
+- **Final weather travel times.** Rain adds one turn to a road leg, storm
+  and snow add two, and a tailwind halves the distance of an air leg.
+- **Tailwind.** It never triggers reconsideration on its own, but once a
+  slowdown triggered it, the search may choose a route a tailwind makes
+  faster.
+
+Evidence is in ADR-021. Without weather, all bundled maps keep their output.
+With seeded weather, 5 of 360 runs change, all on Germany: 3 faster, none
+slower. Herd behavior and road-budget deadlocks remain known limitations of
+uncoordinated rerouting: on 40,000 random road-heavy maps, `DeadlockError`
+occurred 3 times before and 3 times after the change.
+
 ---
 
 ## Evidence
@@ -372,9 +400,11 @@ Two different things happen at a hub:
   to do this turn. Most of the time this means following its current route,
   which is cheap.
 - **Replanning trigger.** An event that justifies a new route search:
-  - the remaining route is invalidated: under the current weather it contains
-    a lane that is closed or otherwise unusable
-    ([ADR-018](decisions.md#adr-018), PR #9);
+  - the remaining route is slower under the current weather than in clear
+    weather, a closed lane counting as infinitely slow
+    ([ADR-018](decisions.md#adr-018), PR #9, widened by
+    [ADR-021](decisions.md#adr-021)). The route is replaced only by a
+    strictly faster one;
   - the aircraft is part of a structural deadlock
     ([ADR-020](decisions.md#adr-020), PR #10).
 
@@ -395,9 +425,10 @@ At a decision point, routing policy chooses one of three options:
 | Wait | Stay in the current hub this turn. Every hub is a safe place to wait. |
 | Reroute | Take a different available route toward the destination. |
 
-Policy compares these options using the current state. How it estimates
-delays (for example, how long a closed lane may stay closed) is not fixed yet
-([DECISION-006](open-decisions.md#decision-006)).
+Policy compares these options using the current state, without delay
+estimates ([DECISION-006](open-decisions.md#decision-006)): routes are
+costed by their travel time under the current weather
+([ADR-021](decisions.md#adr-021)).
 
 ### Hubs are always safe
 
@@ -546,7 +577,7 @@ Implemented in PR #8.
   - `NoWeather`;
   - `RandomWeather`, seeded, with its own `random.Random`;
   - `ScriptedWeather`, a fixed schedule for deterministic tests;
-  - later, a real-weather provider (after PR #11, see
+  - later, a real-weather provider (after the Weather-aware cost step, see
     [Delivery plan](#delivery-plan)).
 - **`WeatherState`** is a snapshot of the current, observed condition of each
   connection, in the project's own terms.
@@ -566,10 +597,10 @@ Implemented in PR #8.
   on network access. Random mode stays available for ordinary runs. This also
   removes the debt of `update_weather()` drawing from the global state even
   when no storm can start.
-- **Shared travel time.** Planner and executor compute travel time with the
-  same transport rules. The weather penalties are provisional; how weather and
-  restricted hubs affect distance lanes stays open until PR #11
-  ([DECISION-001](open-decisions.md#decision-001)).
+- **Shared travel time.** Planner, executor, and route search compute travel
+  time with the same transport rules, which are also the route cost
+  ([ADR-021](decisions.md#adr-021)). Whether restricted hubs affect distance
+  lanes is open ([DECISION-011](open-decisions.md#decision-011)).
 
 ---
 
@@ -597,7 +628,7 @@ working from events. The new model affects it as follows:
   `weather` or `deadlock` (PR #10).
 - **Reroutes** need events of their own, so that tests can observe decisions
   without asserting specific routes ([ADR-002](decisions.md#adr-002)). How
-  they appear in the text output is PR #12
+  they appear in the text output is part of the Output & event audit step
   ([DECISION-003](open-decisions.md#decision-003)).
 - **`ScriptedWeather`** lets behavior tests close a lane on a known turn and
   check that an aircraft finds another way, without fixing which way when
@@ -613,21 +644,23 @@ working from events. The new model affects it as follows:
 ## Delivery plan
 
 The original PR #8 was split in two: a transport and weather foundation, and
-dynamic replanning. Later pull requests moved up by one.
+dynamic replanning. Later pull requests moved up by one. Pull request
+numbers are assigned by GitHub, so steps that are not merged yet are named
+by their scope.
 
-| PR | Scope |
+| Step | Scope |
 | --- | --- |
 | PR #8 | Transport and weather foundation. Transport mode as map data, one set of transport rules, `WeatherState` with `NoWeather`, seeded `RandomWeather`, and `ScriptedWeather`. Roads stay open in storm and snow. ADR-015, ADR-016, ADR-017. No routing changes. |
 | PR #9 | Dynamic replanning. Decision points, continue, wait, and reroute when the weather makes a route unusable, a reroute search on the current weather, `RoutingPolicy.max_consecutive_road_km` in every route search, the road distance each aircraft carries, `AgentRerouted`. ADR-018. No reservations v2. |
 | PR #10 | One capacity model for planner and executor, with committed claims instead of a reservation store. Lanes only for admitted departures. No artificial waiting cycles. Deadlock detection and handling instead of a no-progress trigger. `DeadlockError`. BUG-003. ADR-019, ADR-020, [DECISION-007](open-decisions.md#decision-007), [DECISION-008](open-decisions.md#decision-008). |
-| PR #11 | Weather-aware route cost and final weather penalties. [DECISION-001](open-decisions.md#decision-001). |
-| PR #12 | Output and timeline: turns without movement, waiting, transit, and reroutes. [DECISION-003](open-decisions.md#decision-003), [BUG-004](bug-triage.md#bug-004). |
-| PR #13 | Cleanup: unused pathfinder methods and model state ([TD-001, TD-002](bug-triage.md#technical-debt)), module boundaries. |
+| Weather-aware cost | Weather-aware route cost and final weather travel times. Reconsidering a route when the weather slows it. [ADR-021](decisions.md#adr-021), [DECISION-001](open-decisions.md#decision-001). |
+| Output & event audit | Output and timeline: turns without movement, waiting, transit, and reroutes. [DECISION-003](open-decisions.md#decision-003), [BUG-004](bug-triage.md#bug-004). |
+| Cleanup & benchmark | Remaining dead code: unused pathfinder methods and model state ([TD-001, TD-002](bug-triage.md#technical-debt)). Scalability benchmark, profiling, and optimisation only where the evidence justifies it. |
 
 Not scheduled: parallel air and road lanes between the same hubs
 ([DECISION-009](open-decisions.md#decision-009)) and positioning moves
 ([DECISION-010](open-decisions.md#decision-010)). Real weather comes after
-PR #11, as another provider behind the same boundary.
+the Weather-aware cost step, as another provider behind the same boundary.
 
 Accepted ADRs keep the numbers that were current when they were written. Read
 them with this mapping:
@@ -636,9 +669,9 @@ them with this mapping:
 | --- | --- |
 | PR #8 (dynamic replanning, weather boundary) | PR #8 (weather boundary) and PR #9 (dynamic replanning) |
 | PR #9 (reservations v2, BUG-003) | PR #10 |
-| PR #10 (weather-aware routing) | PR #11 |
-| PR #11 (output) | PR #12 |
-| PR #12 (cleanup) | PR #13 |
+| PR #10 (weather-aware routing) | Weather-aware cost |
+| PR #11 (output) | Output & event audit |
+| PR #12 (cleanup) | Cleanup & benchmark |
 
 ---
 
@@ -653,10 +686,13 @@ PR #10 decided the no-progress trigger (not added,
   10,000-turn limit with a generic error. Telling it apart would need
   knowledge about future weather that providers do not give
   ([ADR-012](decisions.md#adr-012)).
-- Restricted hubs on distance lanes and final weather penalties
-  ([DECISION-001](open-decisions.md#decision-001)), PR #11.
+- Restricted hubs on distance lanes
+  ([DECISION-011](open-decisions.md#decision-011)), not scheduled. The
+  weather part of [DECISION-001](open-decisions.md#decision-001) is decided
+  in [ADR-021](decisions.md#adr-021).
 - Turns without movement in the output
-  ([DECISION-003](open-decisions.md#decision-003)), PR #12.
+  ([DECISION-003](open-decisions.md#decision-003)), Output & event audit
+  step.
 - Parallel air and road lanes ([DECISION-009](open-decisions.md#decision-009))
   and positioning moves ([DECISION-010](open-decisions.md#decision-010)),
   not scheduled.
