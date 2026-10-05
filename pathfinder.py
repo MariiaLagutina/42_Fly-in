@@ -287,9 +287,33 @@ class Pathfinder:
 
         return None
 
+    def route_travel_time(
+        self, start: Zone, route: list[Zone], weather: WeatherState
+    ) -> float:
+        """
+        Turns that the legs of `route` from `start` take under `weather`,
+        with travel times from the transport rules, or infinity if the
+        weather closes one of them. Planned waits are not legs and add
+        nothing.
+        """
+        total = 0
+        current = start
+        for zone in route:
+            if zone is current:
+                continue
+            connection = self.graph.get_connection(current, zone)
+            assert connection is not None
+            condition = weather.condition_of(connection.name())
+            if not is_available(connection, condition):
+                return math.inf
+            total += travel_time(connection, zone, condition)
+            current = zone
+        return total
+
     def _calculate_move_cost(self, current_zone: Zone, next_zone: Zone) -> int:
-        """Travel time of a planned step. Routes are planned before any
-        weather exists, so planning uses clear weather."""
+        """Travel time of a planned step. The initial plan is made before the
+        first weather is observed, so it is a deterministic clear-weather
+        baseline (ADR-021)."""
         if next_zone == current_zone:
             return 1
 

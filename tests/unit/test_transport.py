@@ -1,8 +1,7 @@
 """Transport rules: availability and travel time per mode and weather.
 
-Weather penalties are provisional (DECISION-001), so the tests assert only
-their direction (slower, unchanged), never their exact size. Travel times in
-clear weather follow documented speeds and are asserted exactly.
+Travel times follow documented speeds and weather rules (DECISION-001) and
+are asserted exactly.
 """
 
 import pytest
@@ -85,27 +84,40 @@ def test_clear_travel_time_follows_the_mode_speed(
 
 
 @pytest.mark.parametrize(
-    "condition",
-    [WeatherCondition.RAIN, WeatherCondition.SNOW, WeatherCondition.STORM],
+    ("condition", "expected_turns"),
+    [
+        (WeatherCondition.RAIN, 3),
+        (WeatherCondition.SNOW, 4),
+        (WeatherCondition.STORM, 4),
+    ],
 )
-def test_bad_weather_slows_road_legs(condition: WeatherCondition) -> None:
+def test_bad_weather_adds_turns_to_road_legs(
+    condition: WeatherCondition, expected_turns: int
+) -> None:
+    """150 km of road takes 2 turns; rain adds one, snow and storm two."""
     connection = lane(ROAD, 150)
 
-    assert travel_time(connection, destination(), condition) > travel_time(
-        connection, destination(), CLEAR
-    )
+    assert travel_time(connection, destination(), condition) == expected_turns
 
 
-def test_tailwind_shortens_air_legs_only() -> None:
+def test_tailwind_halves_the_distance_of_air_legs_only() -> None:
+    """900 km of air takes 3 turns, as 450 km with a tailwind 2. Roads are
+    not affected."""
     air, road = lane(AIR, 900), lane(ROAD, 150)
     tailwind = WeatherCondition.TAILWIND
 
-    assert travel_time(air, destination(), tailwind) < travel_time(
-        air, destination(), CLEAR
-    )
-    assert travel_time(road, destination(), tailwind) == travel_time(
-        road, destination(), CLEAR
-    )
+    assert travel_time(air, destination(), tailwind) == 2
+    assert travel_time(road, destination(), tailwind) == 2
+
+
+def test_restricted_hub_does_not_change_distance_travel_time() -> None:
+    """On lanes with a distance, the destination's zone type is ignored
+    (DECISION-001, documented behavior; DECISION-011 is open)."""
+    connection = lane(AIR, 450)
+
+    assert travel_time(
+        connection, destination(ZoneType.RESTRICTED), CLEAR
+    ) == travel_time(connection, destination(), CLEAR)
 
 
 @pytest.mark.parametrize("condition", list(WeatherCondition))

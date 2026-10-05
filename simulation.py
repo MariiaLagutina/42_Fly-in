@@ -146,7 +146,7 @@ class Simulator:
         self._finish_in_transit_drones(
             turn, turn_number, zone_occupancy, moved_drone_ids
         )
-        self._replan_routes(turn_number, moved_drone_ids)
+        self._reconsider_routes(turn_number, moved_drone_ids)
 
         candidates = self._plan_departures(moved_drone_ids)
 
@@ -198,24 +198,30 @@ class Simulator:
             )
         self.weather = weather
 
-    def _replan_routes(
+    def _reconsider_routes(
         self, turn_number: int, moved_drone_ids: set[int]
     ) -> None:
         """
-        Decision point for every aircraft waiting at a hub (ADR-011, ADR-018).
+        Decision point for every aircraft waiting at a hub (ADR-011,
+        ADR-018, ADR-021).
 
-        An aircraft keeps a route that is still usable. If weather made its
-        remaining route unusable, it searches for a route under the current
-        weather; if one exists it reroutes, otherwise it waits in the hub,
-        which is always safe, and keeps its route for when the weather
-        clears. Routes are always planned within the consecutive-road limit
-        from the aircraft's current road distance, so only weather can make
-        them unusable. Aircraft in transit are committed to their leg.
-        Capacity stays the executor's job: the new route ignores other
-        aircraft.
+        An aircraft reconsiders its route only when the current weather
+        makes its remaining route slower than the same route in clear
+        weather; a closed leg makes it infinitely slow. Weather that only
+        makes other routes faster is no reason to reconsider. The search
+        uses the complete current weather, so once triggered it may choose
+        a route that a tailwind makes faster. It ignores other aircraft:
+        capacity stays the executor's job.
+
+        Reconsidering does not imply rerouting. A route that is still open
+        is replaced only by a strictly faster one under the same weather; a
+        tie keeps it. A closed route is replaced by any route found. With
+        none, the aircraft waits in the hub, which is always safe, and keeps
+        its route for when the weather clears. Routes are always planned
+        within the consecutive-road limit from the aircraft's current road
+        distance. Aircraft in transit are committed to their leg.
         """
-        unavailable = self._unavailable_hub_pairs()
-        if not unavailable:
+        if self.weather == WeatherState():
             return
 
         end_zone = self.graph.end_zone
@@ -225,8 +231,13 @@ class Simulator:
                 drone.is_delivered()
                 or drone.state == DroneState.IN_TRANSIT
                 or drone.drone_id in moved_drone_ids
-                or self._route_is_usable(drone, unavailable)
             ):
+                continue
+
+            current = self.pathfinder.route_travel_time(
+                drone.current_zone, drone.path, self.weather
+            )
+            if not self._weather_slows(drone, current):
                 continue
 
             route = self.pathfinder.find_route(
@@ -235,7 +246,9 @@ class Simulator:
                 self.weather,
                 drone.road_km_since_air,
             )
-            if route is None:
+            if route is None or self.pathfinder.route_travel_time(
+                drone.current_zone, route, self.weather
+            ) >= current:
                 continue
 
             drone.path = route
@@ -371,29 +384,13 @@ class Simulator:
             frozenset({next_zone.name}),
         )
 
-    def _unavailable_hub_pairs(self) -> set[frozenset[str]]:
-        """Pairs of hubs whose connection the current weather closes."""
-        return {
-            frozenset((connection.zone_a.name, connection.zone_b.name))
-            for connection in self.graph.connections
-            if not is_available(
-                connection, self.weather.condition_of(connection.name())
-            )
-        }
-
-    def _route_is_usable(
-        self, drone: Drone, unavailable: set[frozenset[str]]
-    ) -> bool:
-        """Whether no remaining leg uses an unavailable connection. Planned
-        waits are not legs."""
-        current = drone.current_zone
-        for zone in drone.path:
-            if zone is current:
-                continue
-            if frozenset((current.name, zone.name)) in unavailable:
-                return False
-            current = zone
-        return True
+    def _weather_slows(self, drone: Drone, turns_now: float) -> bool:
+        """Whether the remaining route, taking `turns_now` turns under the
+        current weather, is slower than in clear weather: the trigger for
+        reconsidering it (ADR-021)."""
+        return turns_now > self.pathfinder.route_travel_time(
+            drone.current_zone, drone.path, WeatherState()
+        )
 
     def _finish_in_transit_drones(
         self,

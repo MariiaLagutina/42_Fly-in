@@ -121,13 +121,24 @@ hub, so an aircraft that has to wait never blocks one that could leave.
 
 ### Rerouting
 
-Each turn, an aircraft waiting at a hub checks whether every remaining leg of
-its route is still available under the current weather. If one is not, it
-looks for the fastest route that is available now and takes it; if there is
-none, it waits in the hub, which is always safe, and continues once the
-weather clears. A route that is still usable is kept even if another one has
-become faster, and an aircraft in the middle of a leg always finishes it.
-Rerouting ignores other aircraft; the capacity checks above still apply.
+Each turn, an aircraft waiting at a hub checks how long the rest of its
+route takes under the current weather. If that is longer than in clear
+weather, it reconsiders the route: it looks for the fastest route under the
+current weather, using the same travel times as the table in
+[Weather](#weather). A closed lane makes a route infinitely slow.
+
+- If its route is closed, the aircraft takes the route it found. If there is
+  none, it waits in the hub, which is always safe, and continues once the
+  weather clears.
+- If its route is still open but slower, the aircraft switches only to a
+  route that is strictly faster now. A tie keeps the current route.
+
+Weather that only makes another route faster, such as a tailwind, is no
+reason to reconsider. Once an aircraft reconsiders, though, the tailwind
+counts. An aircraft in the middle of a leg always finishes it, at the travel
+time fixed when it started. Rerouting ignores other aircraft; the capacity
+checks above still apply. So several aircraft can switch to the same route
+at once.
 
 ### Deadlocks
 
@@ -160,7 +171,9 @@ time is derived from it and the mode:
 | air, over 500 km | 400 km/h | 2 |
 
 Lanes without a `distance` keep the original assignment's rule: entering a
-hub takes one turn, or two for a restricted hub.
+hub takes one turn, or two for a restricted hub. On a lane with a
+`distance`, the hub type does not change travel time; whether it should is
+an open decision.
 
 The default capacity applies only when the lane does not set
 `max_link_capacity` itself. Similarly, a hub with a `population` but no
@@ -177,15 +190,15 @@ a 5% chance to change, and every affected lane has a 20% chance to clear again.
 | `rain` | No effect | One extra turn |
 | `tailwind` | Count as half their distance | No effect |
 
-Weather never creates a lane or changes its distance. The extra turns are
-provisional and may change when the travel-time model is settled. Every hub
-is always a safe place to wait.
+Weather never creates a lane or changes its distance. Every hub is always a
+safe place to wait.
 
-Routes are planned before the first turn in clear weather. When the weather
-makes a route unusable, the aircraft reroutes or waits (see
-[Rerouting](#rerouting)). Weather affects whether a leg can start and how
-long it takes once started. Weather is random and not seeded, so two runs of the same
-map can differ.
+Routes are planned before the first turn in clear weather, so the plan is
+the same in every run. The first weather is that of turn 1, and every
+aircraft sees it before it departs. When the weather makes a route slower or
+closes it, the aircraft reconsiders it (see [Rerouting](#rerouting)).
+Weather affects whether a leg can start and how long it takes once started.
+Weather is random and not seeded, so two runs of the same map can differ.
 
 ## Aviation dispatch center
 

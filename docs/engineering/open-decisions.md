@@ -9,13 +9,13 @@ as an ADR, and this entry is marked `DECIDED` with a link to it.
 
 Statuses: `OPEN`, `NEEDS EVIDENCE`, `DECIDED`.
 
-Target pull request numbers follow the delivery plan in
-[dynamic-routing.md](dynamic-routing.md#delivery-plan), which also maps the
-numbers used before the plan was split.
+Target steps follow the delivery plan in
+[dynamic-routing.md](dynamic-routing.md#delivery-plan). Future steps are
+named by their scope, not by a predicted pull request number.
 
 | ID | Question | Status | Blocks |
 | --- | --- | --- | --- |
-| [DECISION-001](#decision-001) | Does a restricted hub add travel time on distance-based lanes? | `OPEN` | — |
+| [DECISION-001](#decision-001) | What are the final weather travel times, and do restricted hubs affect distance-based lanes? | `DECIDED` (weather part, [ADR-021](decisions.md#adr-021); restricted hubs moved to DECISION-011) | — |
 | [DECISION-002](#decision-002) | What should an aircraft do when execution diverges from its plan? | `DECIDED` | — |
 | [DECISION-003](#decision-003) | How are turns without movement represented in the output? | `OPEN` | [BUG-004](bug-triage.md#bug-004) |
 | [DECISION-004](#decision-004) | What makes a hub or route unsafe, and where does a weather diversion go? | `DECIDED` | — |
@@ -25,17 +25,34 @@ numbers used before the plan was split.
 | [DECISION-008](#decision-008) | Does the one-departure-per-turn rule apply per lane or per direction? | `DECIDED` (per direction) | — |
 | [DECISION-009](#decision-009) | Can two connections, such as air and road, join the same pair of hubs? | `OPEN` | — |
 | [DECISION-010](#decision-010) | Should an aircraft move to an intermediate hub when no route to its destination is available? | `OPEN` | — |
+| [DECISION-011](#decision-011) | Should a restricted hub add travel time on lanes with a distance? | `OPEN` | — |
 
 ---
 
 ## DECISION-001
 
-### Does a restricted hub add travel time on distance-based lanes?
+### What are the final weather travel times, and do restricted hubs affect distance-based lanes?
 
-- **Status:** `OPEN`
-- **To be decided in:** PR #11, weather-aware route cost (travel-time model).
-  It does not affect the dynamic-routing semantics of
-  [dynamic-routing.md](dynamic-routing.md).
+- **Status:** `DECIDED` (weather part); restricted hubs moved to
+  [DECISION-011](#decision-011)
+- **Decided in:** [ADR-021](decisions.md#adr-021), in the Weather-aware cost
+  step.
+
+In short:
+
+- **Weather travel times are final.** Rain adds one turn to a road leg,
+  storm and snow add two, and a tailwind halves the distance of an air leg.
+  `transport.travel_time` is the only source of route cost; routing adds no
+  weather penalties.
+- **Restricted hubs keep the current behavior.** On a lane with a distance,
+  the destination's zone type does not change travel time. This is now
+  documented and tested. Whether it should change is
+  [DECISION-011](#decision-011), still open.
+
+The text below is the question as it was recorded before the decision,
+under the title "Does a restricted hub add travel time on distance-based
+lanes?". It also covered the weather travel times.
+
 - **Since PR #8:** the transport mode is map data, and travel time comes from
   one set of transport rules ([ADR-016](decisions.md#adr-016)). The weather
   penalties there are provisional and are settled together with this
@@ -169,7 +186,7 @@ Details are in [dynamic-routing.md](dynamic-routing.md#evidence).
 ### How are turns without movement represented in the output?
 
 - **Status:** `OPEN`
-- **To be decided in:** PR #12, simulation and output correctness, together
+- **To be decided in:** the Output & event audit step, together
   with how waiting, reroutes, and diversions are shown.
 
 **Context.** The output format of the original assignment prints one line per
@@ -339,10 +356,11 @@ In short:
 - **No-progress trigger:** not added. Aircraft blocked by capacity are
   handled by deadlock detection instead
   ([ADR-020](decisions.md#adr-020), PR #10).
-- **Still open:** whether route
-  cost should weigh the current weather beyond availability (for example,
-  preferring a route without rain) is part of PR #11
-  ([DECISION-001](#decision-001)).
+- **Since the Weather-aware cost step:** the trigger is wider. An aircraft
+  also reconsiders its route when the weather makes it slower than in clear
+  weather, and replaces an open route only by a strictly faster one under
+  the same weather ([ADR-021](decisions.md#adr-021)). Still no delay
+  estimate and no forecast: routes are costed with the current weather.
 
 The text below is the question as it was recorded before the decision.
 
@@ -553,3 +571,51 @@ statistics observed during the run
 
 - Whether positioning moves would shorten runs with weather on the bundled
   maps, once dynamic replanning exists.
+
+---
+
+## DECISION-011
+
+### Should a restricted hub add travel time on lanes with a distance?
+
+- **Status:** `OPEN`
+- **To be decided in:** not scheduled.
+- **Split from:** [DECISION-001](#decision-001), whose weather part was
+  decided in [ADR-021](decisions.md#adr-021).
+
+**Context.** On lanes without a distance, entering a restricted hub takes
+two turns instead of one, as required by the original assignment. On lanes
+with a distance, travel time comes from the distance, the transport mode,
+and the weather ([ADR-016](decisions.md#adr-016)).
+
+**Current behavior.** On a lane with a distance, the destination's zone
+type is ignored: entering a restricted hub takes as long as entering a
+normal one. This is documented in the README and asserted by a transport
+test, so that a change is a deliberate decision.
+
+**Evidence from the Weather-aware cost audit.**
+
+- The bonus maps contain three restricted hubs: Saarbrucken (Germany),
+  Zurich and Milan (Europe). Milan has no lanes, so two restricted hubs are
+  reached by distance lanes.
+- The Europe map describes its restricted hubs as "Crossing the Alps is
+  slow (restricted)". The current behavior does not make them slower.
+- No initial plan on the bundled maps passes through a restricted hub: 0 of
+  10 aircraft on Germany and 0 of 15 on Europe. Reroutes in weather runs can
+  pass through them.
+
+**Alternative considered.** Entering a restricted hub adds one turn on every
+lane, so the rule is the same with and without a distance. Measured with
+seeded `RandomWeather`, 30 seeds per map: Germany is unchanged (16.07
+turns on average), Europe averages 47.43 turns instead of 46.93. Without
+weather, neither map changes. It is not selected.
+
+**Other options.** A multiplier on the distance travel time, or a parser
+error for `zone=restricted` on hubs reached by distance lanes.
+
+**Impact of a change.**
+
+- Travel times on the bonus maps, mostly in weather runs.
+- The invariant checker, which enforces restricted transit time only on
+  lanes without a distance.
+- The README and the transport test that asserts the current behavior.

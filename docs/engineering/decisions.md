@@ -30,9 +30,10 @@ text; the superseding ADR states what it replaces.
 | [ADR-015](#adr-015) | Every hub is a safe waiting location; hub capacity has one layer | Accepted |
 | [ADR-016](#adr-016) | Transport mode is map data; weather acts through one set of transport rules | Accepted |
 | [ADR-017](#adr-017) | Road is a fallback with a consecutive-road budget | Accepted |
-| [ADR-018](#adr-018) | Aircraft reroute only when weather makes their route unusable | Accepted |
+| [ADR-018](#adr-018) | Aircraft reroute only when weather makes their route unusable | Accepted; partly superseded by [ADR-021](#adr-021) |
 | [ADR-019](#adr-019) | One capacity model; committed claims are the only live reservations | Accepted |
 | [ADR-020](#adr-020) | Structural deadlocks are detected each turn and resolved or reported | Accepted |
+| [ADR-021](#adr-021) | Weather that slows a route triggers its reconsideration; route cost is the transport travel time | Accepted |
 
 ---
 
@@ -819,7 +820,8 @@ up to a long drive.
 
 ### Aircraft reroute only when weather makes their route unusable
 
-- **Status:** Accepted
+- **Status:** Accepted; partly superseded by [ADR-021](#adr-021) (the
+  trigger, and keeping a usable route without comparison)
 - **Date:** 2026-10-04
 
 **Context.** [ADR-011](#adr-011) separates decision points from replanning
@@ -1056,3 +1058,123 @@ opposite traffic ([DECISION-007](open-decisions.md#decision-007)).
 - Supersedes the no-progress threshold of ADR-011 and refines the deadlock
   handling of ADR-014.
 - Resolves [DECISION-007](open-decisions.md#decision-007).
+
+---
+
+## ADR-021
+
+### Weather that slows a route triggers its reconsideration; route cost is the transport travel time
+
+- **Status:** Accepted
+- **Date:** 2026-10-05
+
+**Context.** [ADR-018](#adr-018) searches for a new route only when the
+weather closes a leg of the remaining route, and keeps a usable route even
+if another one has become faster. Roads stay open in rain, snow, and storm,
+but get slower ([ADR-016](#adr-016)), so a road route could become much
+slower without the aircraft ever looking for another one. The route search
+already costs routes with the transport rules under the current weather;
+the trigger never reached it for a slowdown. The initial plan is made
+before any weather is observed. Weather is a snapshot of the current state,
+not a forecast ([ADR-012](#adr-012)), and the weather travel times were
+provisional until this decision
+([DECISION-001](open-decisions.md#decision-001)).
+
+**Decision.**
+
+- **Initial plan.** The cooperative plan made before the first turn is a
+  deterministic clear-weather baseline, on purpose. The first observed
+  weather is that of turn 1. The simulator reads it at the start of turn 1,
+  and every aircraft passes its decision point before any departure, so no
+  aircraft leaves without it.
+- **One source of route cost.** The cost of a route is the sum of
+  `transport.travel_time` over its legs under the current weather. Routing
+  adds no weather penalties of its own. Planned waits are not legs.
+- **Availability stays separate.** Whether a leg can start is decided by
+  `transport.is_available`. A closed leg makes the cost of a route
+  infinite.
+- **Trigger: degradation.** At a decision point, an aircraft reconsiders
+  its route when the current weather makes the remaining route slower than
+  the same route in clear weather. A closed leg counts as infinitely slow,
+  so the trigger of ADR-018 is a special case of this one.
+- **Reconsidering is not rerouting.** The search is that of ADR-018: the
+  fastest route under the current weather, ignoring other aircraft, never
+  visiting a hub twice, and within the road budget from the aircraft's
+  current road distance.
+  - A route that is still open is replaced only by a route that is strictly
+    faster under the same weather snapshot. A tie keeps the current route.
+  - A closed route is replaced by any route found. With none, the aircraft
+    waits in the hub and keeps its route, as before.
+- **The whole remaining route is costed under the current snapshot.** This
+  is the semantics ADR-018 already uses for the availability of later legs.
+  It is not a forecast: no duration is inferred. The cost of the next leg
+  is exact, because a leg's travel time is fixed when it starts.
+- **Asymmetry.** Weather that only makes routes faster, such as a
+  tailwind, never triggers reconsideration: a route that is not slowed is
+  kept. Once a slowdown elsewhere has triggered it, the search uses the
+  whole current snapshot, so an alternative that a tailwind makes faster can
+  win.
+- **Weather travel times are final.** Rain adds one turn to a road leg,
+  storm and snow add two, and a tailwind halves the distance of an air leg.
+  They are no longer provisional.
+- **Restricted hubs** do not change travel time on lanes with a distance.
+  Whether they should is a separate question
+  ([DECISION-011](open-decisions.md#decision-011)).
+
+**Rationale.** A prototype compared five designs with the current behavior
+on the 12 bundled maps with seeded `RandomWeather`, 30 seeds each (360 runs
+per design):
+
+| Design | Mean turns | Faster / slower runs | Changed outputs |
+| --- | ---: | ---: | ---: |
+| Current: search only when a leg is closed | 25.52 | — | — |
+| Search when slowed, whole route costed (chosen) | 25.48 | 3 / 0 | 5 |
+| Search when the next leg is slowed, next leg costed | 25.55 | 2 / 4 | 21 |
+| Search whenever any weather exists | 25.28 | 52 / 29 | 111 |
+| Initial plan under turn-1 weather | 25.45 | 8 / 4 | 30 |
+| Initial plan under turn-1 weather, search when slowed | 25.41 | 11 / 4 | 34 |
+
+- **Whole route, not the next leg.** Costing only the next leg ignores a
+  slowdown that is already observed further along the route, and it
+  disagrees with how ADR-018 treats a closed later leg.
+- **No opportunistic search.** Searching whenever any weather exists breaks
+  the spreading of the cooperative plan: on Europe it costs 2.67 turns on
+  average, and over all maps 29 runs get slower.
+- **No weather in the initial plan.** Planning with turn-1 weather needs
+  that weather before planning. `RandomWeather` keeps state, so it would
+  have to be cached. The cooperative search would also need a reachability
+  check under the same weather, or it does not terminate while a lane stays
+  closed. And it would build the snapshot into a plan that spans many
+  turns. It gave no clear gain.
+- **Fixed extra turns stay.** Speed factors would add constants and change
+  every weather run on Germany, without evidence that they describe roads
+  better.
+
+**Consequences.**
+
+- **Without weather nothing changes.** All 12 bundled maps produce the same
+  output, and so do all 36 command-line runs in the default,
+  `--capacity-info`, and `--airlines` modes.
+- **With seeded weather** (360 runs), 5 runs change, all on Germany: 3 are
+  faster (22 to 19, 23 to 15, and 19 to 17 turns), none is slower. Germany
+  averages 15.63 turns instead of 16.07. On the other maps weather only
+  closes lanes or makes them faster, so nothing changes. 0 invariant
+  violations, 0 errors.
+- **Known limitation: herd behavior.** Reconsidering ignores other
+  aircraft, so several aircraft at one hub can switch to the same route at
+  once, and switch back when the weather moves. In two Germany runs, 14
+  extra reroutes gained no turn.
+- **Known limitation: road-budget deadlocks.** Uncoordinated rerouting can
+  change which structural deadlock the consecutive-road budget makes
+  impossible to leave ([ADR-020](#adr-020)). On 40,000 random road-heavy
+  maps with scripted rain, snow, and storm, `DeadlockError` occurred 3 times
+  before and 3 times after this change. One map fails in both versions; two
+  fail only before and two only after. With an unlimited road budget, both
+  maps that fail only after are delivered. The rate did not increase.
+- **Runtime.** With weather, runs on the bundled maps take 10 to 20% longer:
+  each waiting aircraft's route is evaluated twice per turn. Without weather
+  runtime is unchanged.
+- **Replaces** the trigger of ADR-018 and its rule that a usable route is
+  never compared with alternatives. Decides the weather part of
+  [DECISION-001](open-decisions.md#decision-001) and the open note of
+  [DECISION-006](open-decisions.md#decision-006).
