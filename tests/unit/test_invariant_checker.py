@@ -16,7 +16,7 @@ from events import (
     WeatherChanged,
 )
 from airlanes.model.graph import Graph
-from simulation import Simulator
+from airlanes.simulation.engine import Simulator
 from tests.support.graphs import Link, build_graph, end_hub, hub, start_hub
 from tests.support.simulation import SimulationRun, check_invariants
 from airlanes.model.transport_mode import TransportMode

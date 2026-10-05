@@ -2,7 +2,7 @@ import argparse
 import sys
 from events import EventDispatcher
 from parser import Parser, ParseError
-from simulation import Simulator
+from airlanes.simulation.engine import Simulator
 from visualizers import AirlinesVisualizer, CapacityInfoVisualizer, Visualizer
 from airlanes.world.weather import RandomWeather
 

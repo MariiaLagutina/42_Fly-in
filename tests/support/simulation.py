@@ -34,7 +34,7 @@ from events import (
 )
 from airlanes.model.graph import Graph
 from airlanes.routing.policy import RoutingPolicy
-from simulation import Simulator
+from airlanes.simulation.engine import Simulator
 from airlanes.model.transport_mode import TransportMode
 from airlanes.world.weather import WeatherProvider
 from airlanes.model.zone import ZoneType

@@ -6,7 +6,7 @@ from events import (
     TurnStarted,
 )
 from airlanes.model.graph import Graph
-from simulation import SimulationTurn
+from airlanes.simulation.engine import SimulationTurn
 
 
 class Visualizer:
