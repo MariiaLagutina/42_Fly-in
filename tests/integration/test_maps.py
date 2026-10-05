@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from airlanes.events import AgentRerouted
-from parser import Parser
+from airlanes.mapfile import Parser
 from tests.support.simulation import (
     SimulationRun,
     check_invariants,

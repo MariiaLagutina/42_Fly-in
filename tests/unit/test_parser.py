@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from airlanes.model.graph import Graph
-from parser import ParseError, Parser
+from airlanes.mapfile import ParseError, Parser
 from airlanes.model.transport_mode import TransportMode
 from airlanes.model.zone import ZoneType
 
