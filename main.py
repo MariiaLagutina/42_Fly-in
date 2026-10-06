@@ -46,7 +46,7 @@ def main() -> None:
 
     standard_visualizer = None
     if args.pygame:
-        from pygame_standard import PygameStandardVisualizer
+        from airlanes.output.pygame.standard import PygameStandardVisualizer
 
         standard_visualizer = PygameStandardVisualizer(graph, nb_drones)
         if dispatcher is not None:
@@ -54,7 +54,7 @@ def main() -> None:
 
     airlines_pygame_visualizer = None
     if args.pygame_airlines:
-        from pygame_airlines import PygameAirlinesVisualizer
+        from airlanes.output.pygame.airlines import PygameAirlinesVisualizer
 
         airlines_pygame_visualizer = PygameAirlinesVisualizer(graph)
         if dispatcher is not None:
@@ -73,13 +73,13 @@ def main() -> None:
         return
 
     if standard_visualizer is not None:
-        from pygame_standard import run_pygame_standard
+        from airlanes.output.pygame.standard import run_pygame_standard
 
         run_pygame_standard(standard_visualizer)
         return
 
     if airlines_pygame_visualizer is not None:
-        from pygame_airlines import run_pygame_airlines
+        from airlanes.output.pygame.airlines import run_pygame_airlines
 
         run_pygame_airlines(airlines_pygame_visualizer)
         return

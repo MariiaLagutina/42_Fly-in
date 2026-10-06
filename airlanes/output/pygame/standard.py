@@ -9,7 +9,7 @@ from airlanes.events import (
 )
 from airlanes.model.graph import Graph
 from airlanes.model.zone import Zone, ZoneType
-from pygame_common import (
+from airlanes.output.pygame.common import (
     PygameEventCollector,
     DroneDisplayPosition,
     UIColors,

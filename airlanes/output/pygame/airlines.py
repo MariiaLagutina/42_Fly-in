@@ -13,7 +13,7 @@ from airlanes.events import (
     TurnStarted,
 )
 from airlanes.model.connection import Connection
-from pygame_common import (
+from airlanes.output.pygame.common import (
     PygameEventCollector,
     DroneDisplayPosition,
     UIColors,
