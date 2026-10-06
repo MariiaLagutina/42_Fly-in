@@ -30,6 +30,14 @@ def main() -> int:
     except FileNotFoundError:
         print(f"File not found: {args.map_file}", file=sys.stderr)
         return EXIT_ERROR
+    except OSError as exc:
+        # Only the map file is read here, for example a directory or a file
+        # without read permission.
+        print(
+            f"Cannot read map file: {args.map_file}: {exc.strerror or exc}",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
 
     dispatcher = (
         EventDispatcher()

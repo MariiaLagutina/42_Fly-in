@@ -56,6 +56,20 @@ def test_a_missing_map_file_exits_with_an_error(
     assert capsys.readouterr().err == f"File not found: {missing}\n"
 
 
+def test_a_directory_is_reported_as_an_unreadable_map(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """A directory used to end in an `IsADirectoryError` traceback
+    (BUG-007)."""
+    assert run_main(monkeypatch, str(tmp_path)) == EXIT_ERROR
+    # The reason after the path is the operating system's message.
+    error = capsys.readouterr().err
+    assert error.startswith(f"Cannot read map file: {tmp_path}: ")
+    assert error.count("\n") == 1
+
+
 def test_an_invalid_map_exits_with_an_error(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
