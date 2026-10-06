@@ -10,6 +10,7 @@ import random
 
 from airlanes.model.connection import Connection
 from airlanes.model.graph import Graph
+from airlanes.model.zone import Zone
 from airlanes.world.weather import (
     NoWeather,
     RandomWeather,
@@ -18,7 +19,6 @@ from airlanes.world.weather import (
     WeatherProvider,
     WeatherState,
 )
-from airlanes.model.zone import Zone
 
 TURNS = 60
 

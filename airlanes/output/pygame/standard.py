@@ -1,5 +1,6 @@
-import math
 from dataclasses import dataclass
+import math
+
 import pygame
 
 from airlanes.events import (

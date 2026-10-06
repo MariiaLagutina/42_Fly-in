@@ -8,9 +8,9 @@ import pytest
 
 from airlanes.model.connection import Connection
 from airlanes.model.transport_mode import TransportMode
+from airlanes.model.zone import Zone, ZoneType
 from airlanes.world.transport import is_available, travel_time
 from airlanes.world.weather import WeatherCondition
-from airlanes.model.zone import Zone, ZoneType
 
 AIR = TransportMode.AIR
 ROAD = TransportMode.ROAD

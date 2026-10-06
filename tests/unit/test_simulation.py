@@ -11,7 +11,11 @@ import pytest
 
 from airlanes.events import AgentInTransit, AgentRerouted, WeatherChanged
 from airlanes.model.graph import Graph
+from airlanes.model.transport_mode import TransportMode
+from airlanes.model.zone import ZoneType
 from airlanes.simulation.deadlock import DeadlockError
+from airlanes.world.weather import ScriptedWeather, WeatherCondition
+
 from tests.support.graphs import Link, build_graph, end_hub, hub, start_hub
 from tests.support.simulation import (
     check_invariants,
@@ -21,9 +25,6 @@ from tests.support.simulation import (
     SimulationRun,
     run_simulation,
 )
-from airlanes.model.transport_mode import TransportMode
-from airlanes.world.weather import ScriptedWeather, WeatherCondition
-from airlanes.model.zone import ZoneType
 
 AIR = TransportMode.AIR
 ROAD = TransportMode.ROAD

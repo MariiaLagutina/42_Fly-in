@@ -9,13 +9,14 @@ that counts aircraft flying towards a hub (ADR-019, DECISION-008).
 from airlanes.model.connection import Connection
 from airlanes.model.drone import Drone, DroneState
 from airlanes.model.graph import Graph
+from airlanes.model.transport_mode import TransportMode
 from airlanes.simulation.departures import (
     plan_departures,
     select_feasible_moves,
 )
-from tests.support.graphs import Link, build_graph, end_hub, hub, start_hub
-from airlanes.model.transport_mode import TransportMode
 from airlanes.world.weather import WeatherCondition, WeatherState
+
+from tests.support.graphs import Link, build_graph, end_hub, hub, start_hub
 
 ROAD = TransportMode.ROAD
 

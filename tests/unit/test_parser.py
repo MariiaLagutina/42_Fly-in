@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from airlanes.model.graph import Graph
 from airlanes.mapfile import ParseError, Parser
+from airlanes.model.graph import Graph
 from airlanes.model.transport_mode import TransportMode
 from airlanes.model.zone import ZoneType
 

@@ -1,8 +1,8 @@
 """End-to-end smoke test: the CLI runs a simple map to completion."""
 
+from pathlib import Path
 import subprocess
 import sys
-from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MAP_FILE = REPO_ROOT / "maps" / "easy" / "01_linear_path.txt"

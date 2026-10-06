@@ -1,6 +1,7 @@
 from typing import Optional
-from airlanes.model.zone import Zone
+
 from airlanes.model.connection import Connection
+from airlanes.model.zone import Zone
 
 
 class Graph:

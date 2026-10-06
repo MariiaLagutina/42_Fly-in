@@ -2,10 +2,11 @@
 Shared pygame helpers live here only when at least two pygame visualizers
 use the same concept. View-specific layout stays in the window class.
 """
-import pygame
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Optional
+
+import pygame
 
 from airlanes.events import EventListener, SimulationEvent
 from airlanes.model.graph import Graph
@@ -81,7 +82,7 @@ class UIConstants:
     NODE_RADIUS = 16
 
 
-# Moved from pygame_standard for shared map coloring
+# Moved from the standard viewer for shared map coloring
 PYGAME_ZONE_COLORS = {
     "green": UIColors.GREEN,
     "blue": UIColors.BLUE,

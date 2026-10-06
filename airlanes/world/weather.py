@@ -3,12 +3,12 @@
 A `WeatherProvider` supplies the weather for each turn as a `WeatherState`:
 a snapshot of the current, observed condition of each connection. It is not
 a forecast. The simulator decides what a condition means for each transport
-mode (see `transport.py`); providers only describe the weather.
+mode (see `airlanes.world.transport`); providers only describe the weather.
 """
 
-import random
 from collections.abc import Iterable, Mapping
 from enum import Enum
+import random
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Protocol
 

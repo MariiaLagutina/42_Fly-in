@@ -8,13 +8,13 @@ the aircraft that takes a way around, and returns the event that reports it
 for the simulator to emit.
 """
 
+from airlanes.events import AgentRerouted
 from airlanes.model.connection import Connection
 from airlanes.model.drone import Drone, DroneState
 from airlanes.model.graph import Graph
 from airlanes.model.zone import Zone
 from airlanes.routing.pathfinder import Pathfinder
 from airlanes.world.weather import WeatherState
-from airlanes.events import AgentRerouted
 
 
 class DeadlockError(RuntimeError):

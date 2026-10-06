@@ -1,9 +1,9 @@
 """Routing policy: the consecutive-road budget (ADR-017)."""
 
 from airlanes.model.connection import Connection
-from airlanes.routing.policy import RoutingPolicy
 from airlanes.model.transport_mode import TransportMode
 from airlanes.model.zone import Zone
+from airlanes.routing.policy import RoutingPolicy
 
 
 def lane(mode: TransportMode, distance: int) -> Connection:

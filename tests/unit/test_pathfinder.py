@@ -9,12 +9,13 @@ search methods (`find_path_bfs`, `find_path_dijkstra`, `find_multiple_paths`,
 import math
 
 from airlanes.model.graph import Graph
+from airlanes.model.transport_mode import TransportMode
+from airlanes.model.zone import Zone, ZoneType
 from airlanes.routing.pathfinder import Pathfinder
 from airlanes.routing.policy import RoutingPolicy
-from tests.support.graphs import Link, build_graph, end_hub, hub, start_hub
-from airlanes.model.transport_mode import TransportMode
 from airlanes.world.weather import WeatherCondition, WeatherState
-from airlanes.model.zone import Zone, ZoneType
+
+from tests.support.graphs import Link, build_graph, end_hub, hub, start_hub
 
 ROAD = TransportMode.ROAD
 

@@ -5,7 +5,6 @@ silently misses violations would make them meaningless. These tests feed it
 hand-written event streams with one known violation each.
 """
 
-from airlanes.model.drone import DroneState
 from airlanes.events import (
     AgentInTransit,
     AgentMoved,
@@ -15,12 +14,14 @@ from airlanes.events import (
     TurnStarted,
     WeatherChanged,
 )
+from airlanes.model.drone import DroneState
 from airlanes.model.graph import Graph
-from airlanes.simulation.engine import Simulator
-from tests.support.graphs import Link, build_graph, end_hub, hub, start_hub
-from tests.support.simulation import SimulationRun, check_invariants
 from airlanes.model.transport_mode import TransportMode
 from airlanes.model.zone import ZoneType
+from airlanes.simulation.engine import Simulator
+
+from tests.support.graphs import Link, build_graph, end_hub, hub, start_hub
+from tests.support.simulation import SimulationRun, check_invariants
 
 
 def make_graph() -> Graph:

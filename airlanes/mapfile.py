@@ -1,8 +1,9 @@
 import re
-from airlanes.model.zone import Zone, ZoneType
+
 from airlanes.model.connection import Connection
 from airlanes.model.graph import Graph
 from airlanes.model.transport_mode import TransportMode
+from airlanes.model.zone import Zone, ZoneType
 from airlanes.world.transport import default_link_capacity
 
 

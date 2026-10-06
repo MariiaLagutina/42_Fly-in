@@ -1,9 +1,10 @@
+import math
 import random
 import string
 import sys
-import math
-import pygame
 from typing import Optional, TypedDict
+
+import pygame
 
 from airlanes.events import (
     AgentMoved,
@@ -13,6 +14,8 @@ from airlanes.events import (
     TurnStarted,
 )
 from airlanes.model.connection import Connection
+from airlanes.model.transport_mode import TransportMode
+from airlanes.model.zone import Zone
 from airlanes.output.pygame.common import (
     PygameEventCollector,
     DroneDisplayPosition,
@@ -24,8 +27,6 @@ from airlanes.output.pygame.common import (
     IMG_DIR,
     Point,
 )
-from airlanes.model.transport_mode import TransportMode
-from airlanes.model.zone import Zone
 
 
 class FlightInfo(TypedDict):
