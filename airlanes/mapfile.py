@@ -76,7 +76,7 @@ class Parser:
             raise ParseError(line_num, "Invalid nb_drones format.")
 
         value = parts[1].strip()
-        if not value.isdigit() or int(value) <= 0:
+        if not value.isdecimal() or int(value) <= 0:
             raise ParseError(line_num, "nb_drones must be positive integer.")
 
         return int(value)
@@ -116,14 +116,14 @@ class Parser:
         explicit_max_drones = "max_drones" in metadata
         max_drones_str = metadata.get("max_drones", "1")
 
-        if not max_drones_str.isdigit() or int(max_drones_str) <= 0:
+        if not max_drones_str.isdecimal() or int(max_drones_str) <= 0:
             raise ParseError(line_num, "max_drones must be positive integer.")
         max_drones = int(max_drones_str)
 
         population = 0
         if "population" in metadata:
             pop_str = metadata["population"]
-            if pop_str.isdigit():
+            if pop_str.isdecimal():
                 population = int(pop_str)
                 if not explicit_max_drones:
                     max_drones = max(1, population // 100000)
@@ -173,7 +173,7 @@ class Parser:
         explicit_max_link_capacity = "max_link_capacity" in metadata
         capacity_str = metadata.get("max_link_capacity", "1")
 
-        if not capacity_str.isdigit() or int(capacity_str) <= 0:
+        if not capacity_str.isdecimal() or int(capacity_str) <= 0:
             raise ParseError(
                 line_num, "max_link_capacity must be positive integer."
             )
@@ -190,7 +190,7 @@ class Parser:
         distance = 0
         if "distance" in metadata:
             dist_str = metadata["distance"].replace("km", "").strip()
-            if not dist_str.isdigit():
+            if not dist_str.isdecimal():
                 raise ParseError(
                     line_num, "distance must be a whole number of km."
                 )

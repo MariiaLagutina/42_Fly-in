@@ -460,6 +460,56 @@ def test_line_numbers_count_blank_and_comment_lines(
     assert excinfo.value.line_number == 8
 
 
+# Superscript digits such as "²" pass `str.isdigit()` but not `int()`, and
+# used to escape as a ValueError traceback (BUG-007).
+@pytest.mark.parametrize(
+    ("text", "expected_line", "message"),
+    [
+        pytest.param(
+            "nb_drones: ²\n",
+            1,
+            "nb_drones must be positive integer.",
+            id="nb-drones",
+        ),
+        pytest.param(
+            HEADER + "hub: a 1 0 [max_drones=²]\n",
+            4,
+            "max_drones must be positive integer.",
+            id="max-drones",
+        ),
+        pytest.param(
+            HEADER + "connection: start-goal [max_link_capacity=²]\n",
+            4,
+            "max_link_capacity must be positive integer.",
+            id="link-capacity",
+        ),
+        pytest.param(
+            HEADER + "connection: start-goal [distance=²km]\n",
+            4,
+            "distance must be a whole number of km.",
+            id="distance",
+        ),
+    ],
+)
+def test_non_decimal_digits_raise_parse_error(
+    write_map: MapWriter, text: str, expected_line: int, message: str
+) -> None:
+    with pytest.raises(ParseError) as excinfo:
+        parse(write_map(text))
+
+    assert excinfo.value.line_number == expected_line
+    assert excinfo.value.message == message
+
+
+def test_non_decimal_population_does_not_crash(write_map: MapWriter) -> None:
+    """Only the absence of a crash is asserted: how an invalid population
+    is handled is not part of the map format yet."""
+    try:
+        parse(write_map(HEADER + "hub: a 1 0 [population=²]\n"))
+    except ParseError:
+        pass
+
+
 # --- Errors about the file as a whole ---------------------------------------
 
 
