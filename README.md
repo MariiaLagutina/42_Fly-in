@@ -83,6 +83,9 @@ Both accept one map file and these options:
 | `--pygame` | Standard Pygame turn viewer for any map |
 | `--pygame-airlines` | Aviation dispatch center with dynamic weather |
 
+Errors go to stderr. The exit status is 0 on success, 1 when the map cannot
+be read or parsed or the simulation fails, and 2 for invalid arguments.
+
 Example of the compact output:
 
 ```txt
