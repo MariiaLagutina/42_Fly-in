@@ -71,6 +71,7 @@ the code into the `airlanes/` package:
 | [BUG-007](#bug-007) | Some invalid input ends in a traceback instead of an error message | `VERIFIED` | Medium | Map parser and command line |
 | [BUG-008](#bug-008) | `--visual` colors a departure on a reverse-declared lane like its origin | `VERIFIED` | Low | Command-line output |
 | [BUG-009](#bug-009) | The flight log calls every multi-turn departure "mid-air refueling" | `VERIFIED` | Low | Command-line output |
+| [BUG-010](#bug-010) | The standard Pygame viewer calls a later turn without movement the initial state | `VERIFIED` | Low | Pygame output |
 
 ---
 
@@ -708,6 +709,57 @@ than one turn and arrivals, by turn.
 whatever the transport mode, so a road leg into the end hub also
 "lands". No bundled map has such a delivery. It concerns the wording of
 arrivals and is left for a separate change.
+
+---
+
+## BUG-010
+
+### The standard Pygame viewer calls a later turn without movement the initial state
+
+| Field | Value |
+| --- | --- |
+| Status | `VERIFIED` |
+| Severity | Low |
+| Affected area | `airlanes/output/pygame/standard.py`: `DroneSimulationWindow._draw_history_bar` |
+| Discovered during | Output & event audit, 2026-10-06; measured during the Bugs & Cleanup audit, 2026-10-06 |
+| Resolution | Fixed in PR #19: only frame 0 is captioned as the initial state |
+| Regression test | `test_only_the_frame_before_the_first_turn_is_the_initial_state` in `tests/unit/test_pygame_standard.py`, run headless with SDL's dummy video driver. Fails before the fix. |
+| Verification | Full suite passes. Text output, simulation results, events, and the Pygame frames recorded for the Architecture refactor are unchanged. Of the 207 frames the standard viewer draws for the bundled maps, only Europe turn 4 changes. |
+| Related PR | PR #19 |
+
+**Violated expected behavior.** Only the frame before the first turn is
+shown as the initial state. A later turn in which nothing departs or
+arrives is a completed turn, not the initial state.
+
+**Observed behavior.** The history bar showed `Initial state (all drones at
+base)` for every frame without movement tokens: a turn in which an
+aircraft is in the middle of a multi-turn leg, waits at a hub, or only
+changes its route. The map drawn below it could show aircraft on a lane.
+The standard viewer runs without weather; on the bundled maps that
+happens once, on Europe turn 4, with aircraft in transit. With weather,
+698 of the frames of 372 bundled runs would have been affected.
+
+**Reproducer.**
+
+```txt
+nb_drones: 1
+start_hub: start 0 0
+end_hub: goal 1 0
+connection: start-goal [distance=900km]
+```
+
+With `--pygame`, turn 2 showed `Initial state (all drones at base)` while
+the aircraft was drawn on the lane `start-goal`.
+
+**Root cause (confirmed).** `frame.movements == ()` was used as a proxy
+for the state before the first turn. The frame's `turn_number`, which the
+viewer already has, is the actual discriminator: it is 0 only for that
+state.
+
+**Fix.** Frame 0 keeps its caption. A later frame without movement tokens
+shows `No departures or arrivals this turn`, which says only what the
+movement tokens represent; the map shows where each aircraft is. Frame
+contents, events, and results are unchanged.
 
 ---
 
