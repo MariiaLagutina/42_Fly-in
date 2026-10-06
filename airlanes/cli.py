@@ -95,10 +95,12 @@ def main() -> None:
 
     visualizer = Visualizer(graph, use_color=args.visual)
     for turn in turns:
-        # Assignment-style output prints only turns with a movement; the
-        # capacity block of every turn follows it, matched by turn number.
-        if turn.movements:
-            print(visualizer.render_turn(turn))
+        # The renderer decides what a turn shows; a turn with nothing to
+        # show prints no line. The capacity block of every turn follows it,
+        # matched by turn number.
+        line = visualizer.render_turn(turn)
+        if line:
+            print(line)
         if capacity_visualizer is not None:
             block = capacity_visualizer.block_for(turn.turn_number)
             if block is not None:

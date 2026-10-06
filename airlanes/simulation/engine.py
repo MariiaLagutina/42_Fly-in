@@ -33,12 +33,6 @@ class SimulationTurn:
     def add_movement(self, drone_label: str, destination: str) -> None:
         self.movements.append((drone_label, destination))
 
-    def to_output_line(self) -> str:
-        return " ".join(
-            f"{drone_label}-{destination}"
-            for drone_label, destination in self.movements
-        )
-
 
 class Simulator:
     def __init__(
@@ -450,10 +444,6 @@ class Simulator:
             for connection in self.graph.connections
         )
         self._emit(CapacitySnapshot(turn_number, zone_usage, link_usage))
-
-    def print_results(self) -> None:
-        for turn in self.turns:
-            print(turn.to_output_line())
 
     def print_stats(self) -> None:
         print(f"Total turns: {len(self.turns)}")

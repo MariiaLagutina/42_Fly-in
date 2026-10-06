@@ -35,6 +35,7 @@ from airlanes.events import (
 from airlanes.model.graph import Graph
 from airlanes.model.transport_mode import TransportMode
 from airlanes.model.zone import ZoneType
+from airlanes.output.text import Visualizer
 from airlanes.routing.policy import RoutingPolicy
 from airlanes.simulation.engine import Simulator
 from airlanes.world.weather import WeatherProvider
@@ -86,13 +87,16 @@ def run_simulation(
         graph, nb_aircraft, dispatcher, weather=weather, policy=policy
     )
     turns = simulator.run()
+    # Assignment-style output, like the CLI: a turn with nothing to show
+    # prints no line.
+    visualizer = Visualizer(graph)
+    lines = [visualizer.render_turn(turn) for turn in turns]
     return SimulationRun(
         graph,
         nb_aircraft,
         simulator,
         recorder.events,
-        # Assignment-style output, like the CLI: only turns with a movement.
-        [turn.to_output_line() for turn in turns if turn.movements],
+        [line for line in lines if line],
     )
 
 
