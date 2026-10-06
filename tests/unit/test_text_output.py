@@ -7,7 +7,12 @@ nothing for reroutes.
 
 import pytest
 
-from airlanes.output.text import Visualizer, movement_tokens
+from airlanes.events import AgentInTransit, TurnFinished, TurnStarted
+from airlanes.output.text import (
+    AirlinesVisualizer,
+    Visualizer,
+    movement_tokens,
+)
 from airlanes.results import Arrival, Departure, Reroute, TurnResult
 
 from tests.support.graphs import Link, build_graph, end_hub, hub, start_hub
@@ -92,3 +97,21 @@ def test_a_departure_is_colored_by_its_destination(lane: Link) -> None:
     assert Visualizer(graph, use_color=True).render_turn(result) == (
         f"\033[34mD1-{lane_name}\033[0m"
     )
+
+
+def test_flight_log_shows_a_multi_turn_departure_as_in_transit() -> None:
+    """A departure on a leg that does not finish this turn is shown as in
+    transit, whatever the transport mode or the reason the leg takes more
+    than one turn (BUG-009)."""
+    log = AirlinesVisualizer()
+    for event in (
+        TurnStarted(1),
+        AgentInTransit(1, "D1", "start", "start-goal", "goal"),
+        TurnFinished(1, (("D1", "start-goal"),)),
+    ):
+        log.handle(event)
+
+    assert log.render() == [
+        "Turn 1",
+        "  D1: start -> goal via start-goal (in transit)",
+    ]
