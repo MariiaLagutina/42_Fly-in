@@ -9,6 +9,7 @@ import pygame
 from airlanes.events import (
     AgentMoved,
     AgentInTransit,
+    AgentRerouted,
     SimulationEvent,
     WeatherChanged,
     TurnStarted,
@@ -128,6 +129,12 @@ class AirlinesWindow:
         self.current_turn = 0
         self.drone_positions: dict[str, DroneDisplayPosition] = {}
         self.connection_weather: dict[str, str] = {}
+        # A weather reroute happens at a hub, before the aircraft departs
+        # on the new route. The aircraft stays pending until its next
+        # departure; a multi-turn departure then becomes a weather-rerouted
+        # leg until it arrives.
+        self.weather_reroute_pending: set[str] = set()
+        self.weather_rerouted_legs: set[str] = set()
 
         if self.start_hub_name:
             for label, info in self.flight_data.items():
@@ -208,6 +215,10 @@ class AirlinesWindow:
                 "zone",
                 event.destination,
             )
+            # Either the arrival of a multi-turn leg or a one-turn leg,
+            # which departs and arrives in the same turn.
+            self.weather_reroute_pending.discard(event.agent_label)
+            self.weather_rerouted_legs.discard(event.agent_label)
             info = self._get_flight_info(event.agent_label)
             info["origin"] = getattr(event, "origin", info["origin"])
             info["dest"] = event.destination
@@ -221,10 +232,20 @@ class AirlinesWindow:
                 event.origin,
                 event.destination,
             )
+            if event.agent_label in self.weather_reroute_pending:
+                self.weather_reroute_pending.discard(event.agent_label)
+                self.weather_rerouted_legs.add(event.agent_label)
             info = self._get_flight_info(event.agent_label)
             info["origin"] = event.origin
             info["dest"] = event.destination
             info["status"] = "En Route"
+        elif isinstance(event, AgentRerouted):
+            # A later deadlock reroute replaces the weather route, so the
+            # next leg is no longer a consequence of the weather.
+            if event.reason == "weather":
+                self.weather_reroute_pending.add(event.agent_label)
+            else:
+                self.weather_reroute_pending.discard(event.agent_label)
         elif isinstance(event, WeatherChanged):
             self.connection_weather[event.connection_name] = event.condition
 
@@ -477,32 +498,30 @@ class AirlinesWindow:
         return y + 15
 
     def _determine_flight_status(
-        self, info: FlightInfo
+        self, drone_label: str, info: FlightInfo
     ) -> tuple[str, tuple[int, int, int]]:
         """
         Status text is presentation-only. The real route state comes from
         replayed simulation events.
+
+        Travel time is fixed at departure, so the current weather of a lane
+        says nothing about a leg already under way (BUG-011). A weather
+        reroute only states that weather changed the route, not that
+        delivery is later.
         """
         if info["status"] != "En Route":
             return "LANDED", UIColors.YELLOW
+
+        if drone_label in self.weather_rerouted_legs:
+            return "WEATHER REROUTE", UIColors.ORANGE
 
         zone_a = self.graph.get_zone(info["origin"])
         zone_b = self.graph.get_zone(info["dest"])
 
         if zone_a and zone_b:
             conn = self.graph.get_connection(zone_a, zone_b)
-            if conn:
-                current_weather = self.connection_weather.get(
-                    conn.name(), "clear"
-                )
-
-                if conn.mode is TransportMode.ROAD:
-                    if current_weather in ("storm", "snow"):
-                        return "ROAD DELAY", UIColors.RED
-                    return "DRIVING", UIColors.BLUE
-                else:
-                    if current_weather in ("storm", "snow"):
-                        return "DELAYED", UIColors.RED
+            if conn and conn.mode is TransportMode.ROAD:
+                return "DRIVING", UIColors.BLUE
 
         return "EN ROUTE", UIColors.GREEN
 
@@ -566,7 +585,9 @@ class AirlinesWindow:
             ):
                 continue
 
-            status_str, status_color = self._determine_flight_status(info)
+            status_str, status_color = self._determine_flight_status(
+                drone_label, info
+            )
             self._draw_departure_card(
                 y, drone_label, info, status_str, status_color
             )

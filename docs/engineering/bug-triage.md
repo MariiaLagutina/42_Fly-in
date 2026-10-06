@@ -763,6 +763,111 @@ contents, events, and results are unchanged.
 
 ---
 
+## BUG-011
+
+### The dispatch board infers flight delays from the current weather
+
+| Field | Value |
+| --- | --- |
+| Status | `VERIFIED` |
+| Severity | Low |
+| Affected area | `airlanes/output/pygame/airlines.py`: `AirlinesWindow._determine_flight_status` and the event replay |
+| Discovered during | Bugs & Cleanup audit, 2026-10-06 |
+| Resolution | Fixed in PR #20: statuses come only from facts in the event stream; the board shows `WEATHER REROUTE` for the first leg after a weather reroute |
+| Regression test | `test_weather_after_departure_does_not_change_the_status_of_a_leg` (air and road) and `test_weather_reroute_marks_the_first_leg_of_the_new_route` in `tests/unit/test_pygame_airlines.py`, run headless with SDL's dummy video driver. All three fail before the fix. |
+| Verification | Full suite passes. Text output, simulation results, events, and the standard Pygame viewer are unchanged. Every difference on the dispatch board is a removed delay badge or an added `WEATHER REROUTE` (see below). |
+| Related PR | PR #20 |
+
+**Violated expected behavior.** The dispatch board shows only what the
+simulation has established. Travel time is fixed when a leg departs,
+from the weather at that moment; weather that changes later does not
+affect that leg.
+
+**Observed behavior.** For an aircraft in transit, the board looked up
+the *current* weather of its lane and showed `DELAYED` on an air lane or
+`ROAD DELAY` on a road lane in storm or snow. Two causes made the badge
+wrong:
+
+- **Timing.** The weather was read on every frame, not at departure. A
+  storm that started after departure marked the leg as delayed, and a road
+  leg slowed at departure showed `DRIVING` once the weather cleared.
+- **Rules.** The board did not follow the transport model. Storm and snow
+  close an air lane; they never slow a leg already in the air, so
+  `DELAYED` on an air lane was never true. Rain slows a road leg, but the
+  board ignored rain.
+
+Over 12 bundled maps with 30 weather seeds each, 9,542 en-route cards
+were drawn: 61 showed `DELAYED` and 51 `ROAD DELAY`. One of the README
+screenshots shows such a `DELAYED` badge.
+
+**Reproducer.**
+
+```txt
+nb_drones: 1
+start_hub: start 0 0
+end_hub: goal 1 0
+connection: start-goal [distance=900km]
+```
+
+The leg takes 3 turns. With a storm on `start-goal` from turn 2, turn 2
+showed `DELAYED`, and the aircraft still arrived on turn 3.
+
+**Root cause (confirmed).** `_determine_flight_status` inferred a delay
+from the lane's current weather with its own copy of a weather rule. The
+event stream reports neither travel time nor a planned arrival, so the
+board could not tell whether a leg was delayed.
+
+**Fix.** The board no longer infers delays. An en-route aircraft shows
+`EN ROUTE` on an air lane and `DRIVING` on a road lane, or
+`WEATHER REROUTE` on the first leg it takes after
+`AgentRerouted(reason="weather")`, until that leg arrives. The status
+states only that weather changed the route; a rerouted aircraft is not
+necessarily delivered later.
+
+The state lives in the replay. The engine emits a weather reroute at a
+hub before any departure in the same turn, so the replay marks the
+aircraft as pending; its next departure either becomes the rerouted leg
+(`AgentInTransit`) or arrives in the same turn (a one-turn `AgentMoved`),
+and the next `AgentMoved` clears it. A deadlock reroute before that
+departure replaces the weather route and clears the pending mark.
+Seeking replays from the first event, so the state is the same in both
+directions. Over the 360 weather runs, every weather reroute was at the
+aircraft's current hub and its next departure took the first leg of the
+latest new route; a pending weather reroute was replaced 2,495 times by
+another weather reroute and 3 times by a deadlock reroute. Of the
+weather reroutes that led to a departure, 949 started a multi-turn leg
+and 2,718 a one-turn leg, which is never drawn in transit.
+
+Lane colors and weather alerts still use the current weather.
+
+**Measured effect on the dispatch board** (the same 9,542 en-route cards;
+landed cards are unchanged):
+
+| Before | After | Cards |
+| --- | --- | --- |
+| `DELAYED` | `EN ROUTE` | 44 |
+| `DELAYED` | `WEATHER REROUTE` | 17 |
+| `ROAD DELAY` | `DRIVING` | 24 |
+| `ROAD DELAY` | `WEATHER REROUTE` | 27 |
+| `EN ROUTE` | `WEATHER REROUTE` | 1,794 |
+| `DRIVING` | `WEATHER REROUTE` | 16 |
+
+Every `WEATHER REROUTE` matched an independent reading of the events.
+`WEATHER REROUTE` covers 30 % of the en-route cards on the Europe map and
+8 % to 25 % on the other maps with reroutes.
+
+**Deferred.** A truthful `WEATHER DELAY` status needs an explicit
+baseline: a planned arrival, an expected arrival, or an equivalent fact
+reported by the simulation. The events carry none, and computing one in
+the output would duplicate the transport rules. A road leg slowed by
+weather at departure therefore shows `DRIVING`. Delay reporting belongs
+to a future observability discussion of the event contract
+(DECISION-012). Deadlock reroutes and aircraft waiting at a hub get no
+status of their own: the event stream does not say why an aircraft
+waits.
+
+---
+
 ## Technical debt
 
 These are not runtime bugs: the code below is never executed by the

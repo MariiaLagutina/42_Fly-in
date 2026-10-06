@@ -220,8 +220,9 @@ Weather is random and not seeded, so two runs of the same map can differ.
 - airplanes on air legs and cars on road legs, outlined with `pygame.mask` so
   they stay readable on the map
 - lanes colored by current weather, with weather icons
-- a departure board with a flight number and status for every aircraft
-  (`EN ROUTE`, `DRIVING`, `DELAYED`, `ROAD DELAY`, `LANDED`)
+- a departure board with a flight number and status for every aircraft:
+  `EN ROUTE` on an air leg, `DRIVING` on a road leg, `WEATHER REROUTE` on
+  the first leg after weather changed the route, and `LANDED`
 - weather alerts in the sidebar
 - clicking a city prints a hub report (population, hub type, current load)
   to the terminal
