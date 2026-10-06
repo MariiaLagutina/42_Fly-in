@@ -12,7 +12,13 @@ from airlanes.simulation.engine import Simulator
 from airlanes.world.weather import RandomWeather
 
 
-def main() -> None:
+# Exit status of a run: 0 on success, 1 when the map cannot be used or the
+# simulation fails. Invalid arguments exit with 2, from argparse.
+EXIT_OK = 0
+EXIT_ERROR = 1
+
+
+def main() -> int:
     args = _parse_args()
     parser = Parser()
 
@@ -20,10 +26,10 @@ def main() -> None:
         graph, nb_drones = parser.parse(args.map_file)
     except ParseError as exc:
         print(f"Error parsing input file: {exc}", file=sys.stderr)
-        return
+        return EXIT_ERROR
     except FileNotFoundError:
         print(f"File not found: {args.map_file}", file=sys.stderr)
-        return
+        return EXIT_ERROR
 
     dispatcher = (
         EventDispatcher()
@@ -71,19 +77,19 @@ def main() -> None:
         results = simulator.run()
     except RuntimeError as e:
         print(f"Error: {e}", file=sys.stderr)
-        return
+        return EXIT_ERROR
 
     if standard_visualizer is not None:
         from airlanes.output.pygame.standard import run_pygame_standard
 
         run_pygame_standard(standard_visualizer)
-        return
+        return EXIT_OK
 
     if airlines_pygame_visualizer is not None:
         from airlanes.output.pygame.airlines import run_pygame_airlines
 
         run_pygame_airlines(airlines_pygame_visualizer)
-        return
+        return EXIT_OK
 
     if airlines_visualizer is not None:
         for line in airlines_visualizer.render():
@@ -91,7 +97,7 @@ def main() -> None:
         if capacity_visualizer is not None:
             for line in capacity_visualizer.render():
                 print(line)
-        return
+        return EXIT_OK
 
     visualizer = Visualizer(graph, use_color=args.visual)
     for result in results:
@@ -106,6 +112,7 @@ def main() -> None:
             if block is not None:
                 for line in block:
                     print(line)
+    return EXIT_OK
 
 
 def _parse_args() -> argparse.Namespace:
@@ -140,4 +147,4 @@ def _parse_args() -> argparse.Namespace:
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

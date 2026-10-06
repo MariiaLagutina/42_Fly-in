@@ -4,7 +4,9 @@ The command line lives in `airlanes.cli`; `python -m airlanes` runs the same
 entry point.
 """
 
+import sys
+
 from airlanes.cli import main
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
