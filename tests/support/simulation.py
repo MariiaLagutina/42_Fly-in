@@ -22,7 +22,7 @@ hub (ADR-010, ADR-017).
 
 from dataclasses import dataclass
 
-from events import (
+from airlanes.events import (
     AgentInTransit,
     AgentMoved,
     AgentRerouted,
@@ -32,12 +32,12 @@ from events import (
     TurnStarted,
     WeatherChanged,
 )
-from graph import Graph
-from routing_policy import RoutingPolicy
-from simulation import Simulator
-from transport import TransportMode
-from weather import WeatherProvider
-from zone import ZoneType
+from airlanes.model.graph import Graph
+from airlanes.model.transport_mode import TransportMode
+from airlanes.model.zone import ZoneType
+from airlanes.routing.policy import RoutingPolicy
+from airlanes.simulation.engine import Simulator
+from airlanes.world.weather import WeatherProvider
 
 
 class EventRecorder:

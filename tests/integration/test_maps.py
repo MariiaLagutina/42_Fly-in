@@ -6,13 +6,15 @@ original assignment, never against the current algorithm's exact result, so
 better routing never breaks these tests. Routes are not asserted.
 """
 
-import random
 from pathlib import Path
+import random
 
 import pytest
 
-from events import AgentRerouted
-from parser import Parser
+from airlanes.events import AgentRerouted
+from airlanes.mapfile import Parser
+from airlanes.world.weather import RandomWeather
+
 from tests.support.simulation import (
     SimulationRun,
     check_invariants,
@@ -20,7 +22,6 @@ from tests.support.simulation import (
     planned_delivery_turns,
     run_simulation,
 )
-from weather import RandomWeather
 
 MAPS_DIR = Path(__file__).resolve().parents[2] / "maps"
 MAP_FILES = sorted(MAPS_DIR.glob("*/*.txt"))

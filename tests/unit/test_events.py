@@ -4,7 +4,7 @@ import dataclasses
 
 import pytest
 
-from events import (
+from airlanes.events import (
     AgentMoved,
     EventDispatcher,
     SimulationEvent,

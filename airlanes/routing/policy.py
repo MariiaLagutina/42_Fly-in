@@ -1,14 +1,14 @@
 """Routing policy: limits that routing applies on top of the map.
 
 The map defines which connections exist and how they travel (see
-`transport.py`). The routing policy decides which of those journeys routing
-is willing to choose.
+`airlanes.world.transport`). The routing policy decides which of those
+journeys routing is willing to choose.
 """
 
 from dataclasses import dataclass
 
-from connection import Connection
-from transport import TransportMode
+from airlanes.model.connection import Connection
+from airlanes.model.transport_mode import TransportMode
 
 
 @dataclass(frozen=True)

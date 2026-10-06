@@ -11,20 +11,15 @@ routing compares (ADR-021); routing adds no weather penalties of its own.
 """
 
 import math
-from enum import Enum
 from typing import TYPE_CHECKING
 
-from config import SimulationConfig
-from weather import WeatherCondition
+from airlanes.config import SimulationConfig
+from airlanes.model.transport_mode import TransportMode
+from airlanes.world.weather import WeatherCondition
 
 if TYPE_CHECKING:
-    from connection import Connection
-    from zone import Zone
-
-
-class TransportMode(Enum):
-    AIR = "air"
-    ROAD = "road"
+    from airlanes.model.connection import Connection
+    from airlanes.model.zone import Zone
 
 
 # Conditions under which aircraft cannot fly a leg. Roads stay usable in any

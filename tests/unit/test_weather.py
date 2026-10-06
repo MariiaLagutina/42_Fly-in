@@ -8,9 +8,10 @@ implementation detail and is not asserted.
 
 import random
 
-from connection import Connection
-from graph import Graph
-from weather import (
+from airlanes.model.connection import Connection
+from airlanes.model.graph import Graph
+from airlanes.model.zone import Zone
+from airlanes.world.weather import (
     NoWeather,
     RandomWeather,
     ScriptedWeather,
@@ -18,7 +19,6 @@ from weather import (
     WeatherProvider,
     WeatherState,
 )
-from zone import Zone
 
 TURNS = 60
 

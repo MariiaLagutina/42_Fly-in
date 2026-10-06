@@ -2,9 +2,9 @@
 
 import pytest
 
-from connection import Connection
-from transport import TransportMode
-from zone import Zone
+from airlanes.model.connection import Connection
+from airlanes.model.transport_mode import TransportMode
+from airlanes.model.zone import Zone
 
 
 @pytest.fixture

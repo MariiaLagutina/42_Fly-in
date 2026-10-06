@@ -1,13 +1,14 @@
+from collections import deque
 import heapq
 import math
-from collections import deque
 from typing import TypeAlias
-from zone import Zone
-from graph import Graph
-from config import SimulationConfig
-from routing_policy import RoutingPolicy
-from transport import is_available, travel_time
-from weather import WeatherCondition, WeatherState
+
+from airlanes.config import SimulationConfig
+from airlanes.model.graph import Graph
+from airlanes.model.zone import Zone
+from airlanes.routing.policy import RoutingPolicy
+from airlanes.world.transport import is_available, travel_time
+from airlanes.world.weather import WeatherCondition, WeatherState
 
 PathHeapItem: TypeAlias = tuple[float, int, Zone, list[Zone]]
 TimedPathHeapItem: TypeAlias = tuple[float, int, int, int, Zone, list[Zone]]

@@ -1,15 +1,16 @@
-import math
 from dataclasses import dataclass
+import math
+
 import pygame
 
-from events import (
+from airlanes.events import (
     AgentMoved,
     AgentInTransit,
     TurnFinished,
 )
-from graph import Graph
-from zone import Zone, ZoneType
-from pygame_common import (
+from airlanes.model.graph import Graph
+from airlanes.model.zone import Zone, ZoneType
+from airlanes.output.pygame.common import (
     PygameEventCollector,
     DroneDisplayPosition,
     UIColors,

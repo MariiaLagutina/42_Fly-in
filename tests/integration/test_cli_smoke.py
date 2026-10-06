@@ -1,8 +1,8 @@
 """End-to-end smoke test: the CLI runs a simple map to completion."""
 
+from pathlib import Path
 import subprocess
 import sys
-from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MAP_FILE = REPO_ROOT / "maps" / "easy" / "01_linear_path.txt"
@@ -20,6 +20,21 @@ EXPECTED_STDOUT = (
 def test_linear_map_runs_to_completion() -> None:
     result = subprocess.run(
         [sys.executable, "main.py", str(MAP_FILE)],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert result.stderr == ""
+    assert result.stdout == EXPECTED_STDOUT
+
+
+def test_package_entry_point_runs_the_same_cli() -> None:
+    result = subprocess.run(
+        [sys.executable, "-m", "airlanes", str(MAP_FILE)],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,

@@ -64,7 +64,15 @@ make run-pygame MAP=maps/hard/03_ultimate_challenge.txt
 
 ## Output modes
 
-`main.py <map>` accepts one map file and these options:
+Run the simulator from the repository root with `main.py` or, equivalently,
+as the `airlanes` package:
+
+```sh
+uv run --locked python3 main.py maps/easy/01_linear_path.txt
+uv run --locked python3 -m airlanes maps/easy/01_linear_path.txt
+```
+
+Both accept one map file and these options:
 
 | Option | Output |
 | --- | --- |
@@ -272,35 +280,53 @@ each other with no way around (`DeadlockError`).
 
 ## Architecture
 
+The application is one package, `airlanes/`. Root `main.py` and
+`python -m airlanes` both start its command line, `airlanes.cli`.
+
 ```txt
-map file → Parser → Graph (hubs, lanes)
-                      ↓
-                  Pathfinder ← reservation tables
-                      ↓
-                  Simulator ← WeatherProvider → WeatherState
-                      ↓
-                EventDispatcher
-          ↙        ↓         ↓          ↘
-      text    flight log  Pygame     dispatch center
+airlanes/
+├── cli.py, __main__.py   command line, python -m airlanes
+├── mapfile.py            map files → network
+├── model/                hubs, lanes, network, aircraft, transport modes
+├── world/                weather and transport rules
+├── routing/              initial plan, route search, routing policy
+├── simulation/           turn engine, departures, deadlocks
+├── events.py             typed events and the dispatcher
+├── output/               text output, Pygame viewers and their images
+└── config.py             speeds, weather penalties, cost weights
 ```
 
-| Module | Responsibility |
-| --- | --- |
-| `parser.py` | Reads map files into a `Graph`, reports `ParseError` |
-| `graph.py`, `zone.py`, `connection.py` | Hubs, lanes, and their capacities |
-| `drone.py` | State of a single aircraft (waiting, in transit, delivered) |
-| `pathfinder.py` | Cooperative space-time search, reroute search, and move costs |
-| `routing_policy.py` | Routing limits, such as the consecutive-road budget |
-| `simulation.py` | Turn execution, capacity checks, and deadlock handling |
-| `weather.py` | Weather providers (none, seeded random, scripted) and the weather state |
-| `transport.py` | Transport modes and how weather affects their availability and travel time |
-| `events.py` | Typed events and the dispatcher |
-| `visualizers.py` | Text, flight log, and capacity output |
-| `pygame_standard.py`, `pygame_airlines.py`, `pygame_common.py` | Pygame viewers and their shared helpers |
-| `config.py` | Speeds, weather penalties, and cost weights |
+```txt
+map file → mapfile.Parser → Graph (hubs, lanes)
+                               ↓
+                 routing.Pathfinder ← reservation tables
+                               ↓
+              simulation.Simulator ← WeatherProvider → WeatherState
+              (departures, deadlock)
+                               ↓
+                        EventDispatcher
+              ↙          ↓          ↓           ↘
+          text      flight log    Pygame    dispatch center
+```
 
-The simulator does not know which visualizer is attached, so it can run
-headless while the graphical viewers replay the same events.
+| Package or module | Responsibility |
+| --- | --- |
+| `mapfile` | Reads map files into a `Graph`, reports `ParseError` |
+| `model` | Hubs (`zone`), lanes (`connection`), the network (`graph`), aircraft state (`drone`), and transport modes |
+| `world` | Weather providers (none, seeded random, scripted), the weather state, and the transport rules: availability and travel time under the weather |
+| `routing` | Cooperative space-time planning, reroute search, and route cost (`pathfinder`); routing limits such as the consecutive-road budget (`policy`) |
+| `simulation` | Turn execution and route reconsideration (`engine`), departures under lane and hub capacity (`departures`), and deadlock resolution (`deadlock`) |
+| `events` | Typed events and the dispatcher |
+| `output` | Text, flight log, and capacity output (`text`); Pygame viewers, their shared helpers, and images (`pygame`) |
+| `cli` | Command-line options and the choice of output |
+| `config` | Speeds, weather penalties, and cost weights |
+
+Dependencies form an acyclic graph toward lower-level responsibilities:
+domain and configuration at the bottom, then world and routing rules,
+simulation, output, and finally CLI wiring. The simulator does not know
+which visualizer is attached, so it can run headless while the graphical
+viewers replay the same events. The exact allowed dependency directions are
+recorded in [ADR-022](docs/engineering/decisions.md#adr-022).
 
 ## Development
 

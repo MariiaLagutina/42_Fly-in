@@ -34,6 +34,7 @@ text; the superseding ADR states what it replaces.
 | [ADR-019](#adr-019) | One capacity model; committed claims are the only live reservations | Accepted |
 | [ADR-020](#adr-020) | Structural deadlocks are detected each turn and resolved or reported | Accepted |
 | [ADR-021](#adr-021) | Weather that slows a route triggers its reconsideration; route cost is the transport travel time | Accepted |
+| [ADR-022](#adr-022) | Package structure and layer boundaries | Accepted |
 
 ---
 
@@ -1178,3 +1179,160 @@ per design):
   never compared with alternatives. Decides the weather part of
   [DECISION-001](open-decisions.md#decision-001) and the open note of
   [DECISION-006](open-decisions.md#decision-006).
+
+---
+
+## ADR-022
+
+### Package structure and layer boundaries
+
+- **Status:** Accepted
+- **Date:** 2026-10-06
+
+**Context.** All application code lived in seventeen flat modules at the
+repository root. Nothing showed which module may depend on which, and
+`simulation.py` combined turn execution with two self-contained decision
+procedures: departure arbitration ([ADR-019](#adr-019),
+[DECISION-008](open-decisions.md#decision-008)) and deadlock handling
+([ADR-020](#adr-020)). Both could be tested only through whole simulation
+runs. The next step, the Output & event audit, works on the boundary
+between the simulation and its outputs, so that boundary had to be visible
+first. The refactor was not allowed to change behavior.
+
+**Decision.**
+
+- **One application package.** All application code, including the images
+  the Pygame viewers load at runtime, lives in the `airlanes/` package.
+  Outside it are only the tests (`tests/`), map data that is passed in by
+  path (`maps/`), documentation, and the `main.py` entry point.
+- **A root package, not a `src/` layout.** The project runs from a checkout:
+  `uv` does not build it (`package = false`), and the tests import it from
+  the repository root. A `src/` layout guards against importing an
+  uninstalled tree instead of the installed package; with nothing
+  installed, that protection has no use, and the root layout keeps both
+  entry points working from a checkout.
+- **Not installable yet.** There is no build backend and no console script.
+  Making the package installable changes the dependency setup and how the
+  project is distributed, and nothing needs it now. It is a separate
+  decision.
+- **Responsibilities:**
+
+  | Package or module | Responsibility |
+  | --- | --- |
+  | `config` | Speeds, weather penalties, and cost weights |
+  | `model` | Hubs, lanes, the network, aircraft state, and transport modes |
+  | `world` | Weather providers and state, and the transport rules that apply the weather to a lane |
+  | `routing` | The cooperative initial plan, route search, route cost, and the routing policy |
+  | `simulation` | Turn execution (`engine`), departure arbitration (`departures`), and deadlock resolution (`deadlock`) |
+  | `events` | Typed simulation events and the dispatcher |
+  | `mapfile` | Reads map files into a network, reports `ParseError` |
+  | `output` | Text output (`output.text`) and the Pygame viewers with their images (`output.pygame`) |
+  | `cli` | The command line: arguments, wiring, and the choice of output |
+
+- **Dependency directions.** Besides its own modules, a package depends
+  only on the packages listed for it:
+
+  | Package | May depend on |
+  | --- | --- |
+  | `config`, `events`, `model` | nothing else in the application |
+  | `world` | `model`, `config` |
+  | `routing` | `model`, `world`, `config` |
+  | `simulation` | `model`, `world`, `routing`, `events`, `config` |
+  | `mapfile` | `model`, `world` |
+  | `output` | `model`, `events`, `simulation` |
+  | `cli` | everything except `__main__` |
+
+  Imports are absolute (`airlanes.…`). Package `__init__.py` files contain
+  only a docstring and re-export nothing, so every import names the module
+  that defines the name.
+- **Two entry points, one command line.** `python3 main.py <map>` and
+  `python3 -m airlanes <map>` both call `airlanes.cli.main`. Root `main.py`
+  stays because it is the documented command, the `make` targets and the
+  smoke test use it, and it is the entry point of the original 42 project.
+  It only calls the command line. The two entry points differ only where
+  Python itself shows the entry point: the program name in `--help` and
+  usage errors, and the frames of a traceback.
+- **Departure arbitration and deadlock resolution are separate modules.**
+  Each is a complete decision with its own ADR, so it gets its own module
+  with explicit parameters instead of access to the whole `Simulator`, and
+  its own unit tests. The order of state changes and events is unchanged:
+  - `departures.plan_departures` lists the aircraft that want to leave on
+    an open lane and, as before, uses up planned waits.
+    `departures.select_feasible_moves` hands out lanes, departure slots,
+    and hub places, and adds the departures it keeps to the lane usage of
+    the turn.
+  - `deadlock.resolve_deadlock` replaces the route of the one aircraft that
+    takes a way around and returns the `AgentRerouted` event. The
+    simulator emits it immediately, at the same point in the turn as
+    before. `DeadlockError` moved with it.
+- **Route reconsideration stays in the engine.** Reconsidering routes when
+  the weather slows them ([ADR-021](#adr-021)) is a step of the turn
+  between arrivals and departures. Extracting it would mean either passing
+  the event dispatcher into it, or returning the events and emitting them
+  after the loop over all aircraft instead of right after each change. No
+  current listener could see that difference, but it is not worth
+  introducing for symmetry between modules.
+- **Deliberately unchanged:**
+  - **`output` depends on `simulation`** only because `SimulationTurn`, the
+    per-turn movement list, is defined in the engine and used in one type
+    annotation of the text output. What the output should consume is the
+    question of the Output & event audit.
+  - **Planner and executor keep their own capacity representations.** They
+    follow one capacity model ([ADR-019](#adr-019)), but unifying the data
+    structures is not a move.
+  - **The planner's reservation tables keep their format.** One table mixes
+    lane usage with departure slots, whose keys are built from the lane and
+    hub names with `_dept_`. A typed reservation table would separate them,
+    but it changes the representation and can change behavior for hub names
+    that contain `_dept_`, so it needs its own change.
+  - **The Pygame viewers moved without redesign**, including their window
+    titles and the background chosen from the command-line arguments.
+  - **Outside this refactor:** renaming `Drone` to `Aircraft`, removing
+    dead code ([TD-001, TD-002](bug-triage.md#technical-debt)), a shared
+    arrival step in the engine, performance work, parser hardening, and the
+    other Cleanup & benchmark items.
+
+**Rationale.** A move can break behavior silently: an import that resolves
+to a stale module, an image path that no longer resolves (the image
+loaders return nothing instead of failing), or an event emitted at a
+different point in the turn. Before the first move, the behavior was
+recorded, and every commit was compared against that record:
+
+- **Tests.** The full suite, which grew from 313 to 324 tests with the new
+  direct tests for departures, deadlocks, and `python -m airlanes`.
+- **Simulation fingerprints.** A hash of the complete event stream, the
+  final status, and the printed output of every run: the 12 bundled maps
+  without weather and with 30 weather seeds each, all bundled maps in each
+  text mode of the command line, and 60,000 generated maps with scripted
+  weather, three of which end in a road-budget deadlock, the known
+  limitation of ADR-021. They were identical for `PYTHONHASHSEED` 0 to 5,
+  so no result depends on the hash order of sets.
+- **Parser snapshot.** The networks built from all bundled maps, and the
+  exception type, message, and line for crafted and randomly corrupted
+  maps, in process and through the command line.
+- **Text-output snapshot.** Plain and colored turn lines, the flight log,
+  and the capacity blocks for runs with weather, reroutes, deadlocks, and
+  turns without movement, compared byte for byte.
+- **Headless Pygame.** With SDL's dummy video driver: every image found and
+  loaded with the same pixels, every frame of both viewers drawn with the
+  same pixels, the background chosen for Germany and Europe, and both
+  viewers' event loops driven by posted key, mouse, and quit events.
+- **Dependency audit.** Imports, cycles, and the directions above, checked
+  after every commit.
+
+The scripts are not part of the repository; this list is enough to rebuild
+them.
+
+**Consequences.**
+
+- **No change in behavior.** Every simulation fingerprint, the text-output
+  snapshot, and the Pygame check are identical before and after. The only
+  differences are file names and line numbers in the traceback of an
+  uncaught exception, and the program name that `argparse` shows under
+  `python -m airlanes`.
+- **New modules have a place.** A module joins the package whose
+  responsibility it has, and its imports follow the directions above.
+- **The directions are documented, not enforced.** No test checks them yet.
+  A check can be added when the structure has settled.
+- **`python -m airlanes` works from the repository root**, or with the
+  repository root on `PYTHONPATH`, until the project becomes installable.

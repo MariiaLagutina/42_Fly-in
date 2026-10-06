@@ -1,9 +1,9 @@
 from typing import TYPE_CHECKING
 
-from transport import TransportMode
+from airlanes.model.transport_mode import TransportMode
 
 if TYPE_CHECKING:
-    from zone import Zone
+    from airlanes.model.zone import Zone
 
 
 class Connection:
