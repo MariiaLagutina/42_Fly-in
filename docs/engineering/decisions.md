@@ -35,6 +35,7 @@ text; the superseding ADR states what it replaces.
 | [ADR-020](#adr-020) | Structural deadlocks are detected each turn and resolved or reported | Accepted |
 | [ADR-021](#adr-021) | Weather that slows a route triggers its reconsideration; route cost is the transport travel time | Accepted |
 | [ADR-022](#adr-022) | Package structure and layer boundaries | Accepted |
+| [ADR-023](#adr-023) | The simulation result keeps every completed turn; the output decides what to print | Accepted |
 
 ---
 
@@ -1336,3 +1337,81 @@ them.
   A check can be added when the structure has settled.
 - **`python -m airlanes` works from the repository root**, or with the
   repository root on `PYTHONPATH`, until the project becomes installable.
+
+---
+
+## ADR-023
+
+### The simulation result keeps every completed turn; the output decides what to print
+
+- **Status:** Accepted
+- **Date:** 2026-10-06
+
+**Context.** `Simulator.run()` kept a turn only if an aircraft started or
+finished a move in it. A turn in which every aircraft was in the air,
+waited for weather or for a hub place, or followed a planned wait was
+simulated, sent its events, and was then left out of the result
+([BUG-004](bug-triage.md#bug-004)). The engine was deciding what the
+output prints. The text output of the original assignment does print only
+turns with a movement, but the other outputs show every turn, and the
+`--capacity-info` mode paired the shortened turn list with the capacity
+block of every turn by position, so blocks landed on the wrong turns
+([BUG-005](bug-triage.md#bug-005)). The Output & event audit found 699 of
+9,368 simulated turns (7.5%) missing from the result in 372 runs of the
+bundled maps, without weather and with 30 weather seeds each.
+
+**Decision.**
+
+- **Two different notions.** A *completed turn* is a turn whose execution
+  returned without an exception. A *movement turn* is a completed turn in
+  which at least one aircraft started or finished a move. Every movement
+  turn is a completed turn; the reverse does not hold.
+- **The result keeps every completed turn.** For every turn `n` that
+  completes, the result of `Simulator.run()` contains exactly one
+  `SimulationTurn` with `turn_number == n`, in order and without gaps: turn
+  numbers run `1, 2, …, N`. A turn without movement is kept with an empty
+  movement list.
+- **The failure boundary.** A turn interrupted by an exception, such as
+  `DeadlockError`, is not completed and is not kept. The exception leaves
+  `run()`, so `run()` returns no result; `Simulator.turns` still holds the
+  turns that completed before it. At the 10,000-turn limit, the last turn
+  completes and is kept before `RuntimeError` is raised.
+- **The output decides what to print.** The assignment-style text output,
+  with or without `--visual`, prints only movement turns, exactly as
+  before. It prints no empty line, turn header, or placeholder for other
+  turns. With `--capacity-info`, every completed turn has its capacity
+  block, found by turn number, and a turn without movement prints only its
+  block.
+- **Deliberately unchanged.** `SimulationTurn`, the events, the flight
+  log, and the Pygame viewers are not changed. How turns without movement,
+  waiting, and transit should appear in the text output is still open
+  ([DECISION-003](open-decisions.md#decision-003)).
+
+**Rationale.**
+
+- Which turns happened is a fact of the simulation; which turns are worth
+  printing is a choice of one output. Filtering in the engine forced that
+  choice on every consumer of the result.
+- Matching a capacity block to its turn by number does not depend on two
+  lists having the same length, which was the cause of BUG-005.
+- Keeping the filter in the text output preserves the assignment format
+  byte for byte, so the decision does not prejudge DECISION-003.
+
+**Consequences.**
+
+- `len(Simulator.run())` is the number of completed turns.
+- The movement filter appears in two places: the command line and the test
+  helper `run_simulation`, whose `output` models the assignment-style text.
+  Both go away when the result model replaces `SimulationTurn`, which is a
+  separate decision.
+- Verified against the behavior record of [ADR-022](#adr-022), with the
+  printed output compared for movement turns only: event streams and
+  simulation fingerprints for the bundled maps with and without weather
+  and for 60,000 generated maps, the text-output snapshot, the Pygame
+  frames, and the command line in the default, `--visual`, and
+  `--airlines` modes are identical. Only `--capacity-info` output changes,
+  on maps with a turn without movement: among the bundled maps without
+  weather, only Europe. In every run, including the three that end in
+  `DeadlockError`, the kept turns are exactly the turns that finished.
+- Fixes [BUG-004](bug-triage.md#bug-004) and
+  [BUG-005](bug-triage.md#bug-005).
