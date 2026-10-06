@@ -18,6 +18,7 @@ from airlanes.world.weather import RandomWeather
 from tests.support.simulation import (
     SimulationRun,
     check_invariants,
+    check_outcomes_against_events,
     delivery_turns,
     planned_delivery_turns,
     run_simulation,
@@ -108,6 +109,18 @@ def test_result_keeps_every_turn(map_file: Path) -> None:
     assert [turn.turn_number for turn in run.simulator.turns] == list(
         range(1, run.turn_count + 1)
     )
+
+
+@pytest.mark.parametrize("seed", [None, 0, 1, 2])
+@pytest.mark.parametrize("map_file", MAP_FILES, ids=map_id)
+def test_turn_results_agree_with_the_event_stream(
+    map_file: Path, seed: int | None
+) -> None:
+    """Turn results and events describe the same facts, in the same order,
+    until the event contract is decided (DECISION-012)."""
+    run = simulate(map_id(map_file), weather_seed=seed)
+
+    assert check_outcomes_against_events(run) == []
 
 
 @pytest.mark.parametrize("map_file", MAP_FILES, ids=map_id)
