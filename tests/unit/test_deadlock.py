@@ -14,6 +14,7 @@ from airlanes.model.connection import Connection
 from airlanes.model.drone import Drone
 from airlanes.model.graph import Graph
 from airlanes.model.transport_mode import TransportMode
+from airlanes.results import Reroute
 from airlanes.routing.pathfinder import Pathfinder
 from airlanes.simulation.deadlock import DeadlockError, resolve_deadlock
 from airlanes.world.weather import WeatherCondition, WeatherState
@@ -69,7 +70,7 @@ def resolve(
     drones: list[Drone],
     weather: WeatherState | None = None,
     candidates: list[Drone] | None = None,
-) -> AgentRerouted | None:
+) -> tuple[Reroute, AgentRerouted] | None:
     return resolve_deadlock(
         5,
         blocked_departures(
@@ -92,9 +93,12 @@ def test_first_aircraft_with_a_way_around_takes_it() -> None:
     graph = swap_with_ways_around()
     d1, d2 = swapping_pair(graph)
 
-    event = resolve(graph, [d1, d2])
+    resolved = resolve(graph, [d1, d2])
 
-    assert event == AgentRerouted(5, "D1", "a", ("goal",), "deadlock")
+    assert resolved == (
+        Reroute("D1", "a", ("b", "goal"), ("goal",)),
+        AgentRerouted(5, "D1", "a", ("goal",), "deadlock"),
+    )
     assert path_names(d1) == ["goal"]
     assert path_names(d2) == ["a", "goal"]
 
@@ -104,9 +108,12 @@ def test_way_around_is_taken_under_the_current_weather() -> None:
     graph = swap_with_ways_around()
     d1, d2 = swapping_pair(graph)
 
-    event = resolve(graph, [d1, d2], WeatherState({"a-goal": STORM}))
+    resolved = resolve(graph, [d1, d2], WeatherState({"a-goal": STORM}))
 
-    assert event == AgentRerouted(5, "D2", "b", ("goal",), "deadlock")
+    assert resolved == (
+        Reroute("D2", "b", ("a", "goal"), ("goal",)),
+        AgentRerouted(5, "D2", "b", ("goal",), "deadlock"),
+    )
     assert path_names(d1) == ["b", "goal"]
 
 

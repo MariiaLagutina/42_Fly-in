@@ -68,7 +68,7 @@ def main() -> None:
         weather=RandomWeather(graph) if args.pygame_airlines else None,
     )
     try:
-        turns = simulator.run()
+        results = simulator.run()
     except RuntimeError as e:
         print(f"Error: {e}", file=sys.stderr)
         return
@@ -94,15 +94,15 @@ def main() -> None:
         return
 
     visualizer = Visualizer(graph, use_color=args.visual)
-    for turn in turns:
+    for result in results:
         # The renderer decides what a turn shows; a turn with nothing to
         # show prints no line. The capacity block of every turn follows it,
         # matched by turn number.
-        line = visualizer.render_turn(turn)
+        line = visualizer.render_turn(result)
         if line:
             print(line)
         if capacity_visualizer is not None:
-            block = capacity_visualizer.block_for(turn.turn_number)
+            block = capacity_visualizer.block_for(result.turn_number)
             if block is not None:
                 for line in block:
                     print(line)

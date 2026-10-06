@@ -14,6 +14,13 @@ from airlanes.model.drone import Drone, DroneState
 from airlanes.model.graph import Graph
 from airlanes.model.transport_mode import TransportMode
 from airlanes.model.zone import Zone
+from airlanes.results import (
+    Arrival,
+    Departure,
+    Reroute,
+    TurnOutcome,
+    TurnResult,
+)
 from airlanes.routing.pathfinder import Pathfinder
 from airlanes.routing.policy import RoutingPolicy
 from airlanes.simulation.deadlock import resolve_deadlock
@@ -23,15 +30,6 @@ from airlanes.simulation.departures import (
 )
 from airlanes.world.transport import is_available, travel_time
 from airlanes.world.weather import NoWeather, WeatherProvider, WeatherState
-
-
-class SimulationTurn:
-    def __init__(self, turn_number: int) -> None:
-        self.turn_number = turn_number
-        self.movements: list[tuple[str, str]] = []
-
-    def add_movement(self, drone_label: str, destination: str) -> None:
-        self.movements.append((drone_label, destination))
 
 
 class Simulator:
@@ -53,7 +51,7 @@ class Simulator:
         self.policy = policy if policy is not None else RoutingPolicy()
         self.drones: list[Drone] = []
         self.pathfinder = Pathfinder(graph, self.policy)
-        self.turns: list[SimulationTurn] = []
+        self.turns: list[TurnResult] = []
         self._create_drones()
 
     def _create_drones(self) -> None:
@@ -94,12 +92,12 @@ class Simulator:
     def _path_cost(self, path: list[Zone]) -> int:
         return sum(zone.movement_cost() for zone in path[1:])
 
-    def run(self) -> list[SimulationTurn]:
+    def run(self) -> list[TurnResult]:
         """
-        Every turn that completes is kept, including turns in which no
-        aircraft moves (ADR-023): turn numbers run 1, 2, ..., N without gaps.
-        A turn interrupted by an exception is not kept. Which turns are
-        printed is decided by the output, not here.
+        Every turn that completes is kept as a `TurnResult`, including turns
+        without outcomes (ADR-023, ADR-024): turn numbers run 1, 2, ..., N
+        without gaps. A turn interrupted by an exception is not kept. Which
+        turns are printed is decided by the output, not here.
         """
         self._assign_paths()
         turn_number = 1
@@ -114,14 +112,18 @@ class Simulator:
     def _all_delivered(self) -> bool:
         return all(drone.is_delivered() for drone in self.drones)
 
-    def _execute_turn(self, turn_number: int) -> SimulationTurn:
+    def _execute_turn(self, turn_number: int) -> TurnResult:
         """
         A turn is processed in phases: finish existing transit, let aircraft
         at hubs replace routes that became unusable, plan departures from a
         stable snapshot, keep the moves that fit hub capacity, apply them,
         then look for aircraft that block each other for good.
         """
-        turn = SimulationTurn(turn_number)
+        outcomes: list[TurnOutcome] = []
+        # The same moves in the assignment-style form that `TurnFinished`
+        # carries. Kept alongside the outcomes until the event contract is
+        # decided (DECISION-012).
+        movements: list[tuple[str, str]] = []
         self._emit(TurnStarted(turn_number))
         self._update_weather(turn_number)
 
@@ -130,9 +132,9 @@ class Simulator:
         moved_drone_ids: set[int] = set()
 
         self._finish_in_transit_drones(
-            turn, turn_number, zone_occupancy, moved_drone_ids
+            outcomes, movements, turn_number, zone_occupancy, moved_drone_ids
         )
-        self._reconsider_routes(turn_number, moved_drone_ids)
+        self._reconsider_routes(outcomes, turn_number, moved_drone_ids)
 
         candidates = plan_departures(
             self.drones, self.graph, self.weather, moved_drone_ids
@@ -143,7 +145,8 @@ class Simulator:
         )
 
         self._apply_planned_moves(
-            turn,
+            outcomes,
+            movements,
             turn_number,
             feasible_moves,
             zone_occupancy,
@@ -159,13 +162,15 @@ class Simulator:
             self.weather,
         )
         if deadlock_reroute is not None:
-            self._emit(deadlock_reroute)
+            reroute, event = deadlock_reroute
+            outcomes.append(reroute)
+            self._emit(event)
 
-        self._emit(TurnFinished(turn_number, tuple(turn.movements)))
+        self._emit(TurnFinished(turn_number, tuple(movements)))
         self._emit_capacity_snapshot(
             turn_number, zone_occupancy, connection_usage
         )
-        return turn
+        return TurnResult(turn_number, tuple(outcomes))
 
     def _update_weather(self, turn_number: int) -> None:
         """
@@ -197,7 +202,10 @@ class Simulator:
         self.weather = weather
 
     def _reconsider_routes(
-        self, turn_number: int, moved_drone_ids: set[int]
+        self,
+        outcomes: list[TurnOutcome],
+        turn_number: int,
+        moved_drone_ids: set[int],
     ) -> None:
         """
         Decision point for every aircraft waiting at a hub (ADR-011,
@@ -249,14 +257,14 @@ class Simulator:
             ) >= current:
                 continue
 
+            hub = drone.current_zone.name
+            old_route = tuple(zone.name for zone in drone.path)
+            new_route = tuple(zone.name for zone in route)
             drone.path = route
+            outcomes.append(Reroute(drone.label, hub, old_route, new_route))
             self._emit(
                 AgentRerouted(
-                    turn_number,
-                    drone.label,
-                    drone.current_zone.name,
-                    tuple(zone.name for zone in route),
-                    "weather",
+                    turn_number, drone.label, hub, new_route, "weather"
                 )
             )
 
@@ -270,7 +278,8 @@ class Simulator:
 
     def _finish_in_transit_drones(
         self,
-        turn: SimulationTurn,
+        outcomes: list[TurnOutcome],
+        movements: list[tuple[str, str]],
         turn_number: int,
         zone_occupancy: dict[str, int],
         moved_drone_ids: set[int],
@@ -288,6 +297,8 @@ class Simulator:
                 continue
 
             origin = drone.current_zone.name
+            lane = drone.transit_connection_name
+            assert lane is not None
             drone.current_zone = target
             drone.transit_target = None
             drone.transit_connection_name = None
@@ -299,7 +310,8 @@ class Simulator:
             zone_occupancy[target.name] = (
                 zone_occupancy.get(target.name, 0) + 1
             )
-            turn.add_movement(drone.label, target.name)
+            outcomes.append(Arrival(drone.label, origin, target.name, lane))
+            movements.append((drone.label, target.name))
             self._emit(
                 AgentMoved(
                     turn_number,
@@ -313,7 +325,8 @@ class Simulator:
 
     def _apply_planned_moves(
         self,
-        turn: SimulationTurn,
+        outcomes: list[TurnOutcome],
+        movements: list[tuple[str, str]],
         turn_number: int,
         planned_moves: list[tuple[Drone, Connection]],
         zone_occupancy: dict[str, int],
@@ -345,7 +358,10 @@ class Simulator:
                 drone.transit_connection_name = conn_name
                 drone.transit_turns_left = transit_time - 1
 
-                turn.add_movement(drone.label, conn_name)
+                outcomes.append(
+                    Departure(drone.label, origin, next_zone.name, conn_name)
+                )
+                movements.append((drone.label, conn_name))
                 self._emit(
                     AgentInTransit(
                         turn_number,
@@ -369,7 +385,11 @@ class Simulator:
             else:
                 drone.state = DroneState.WAITING
 
-            turn.add_movement(drone.label, moved_to.name)
+            # A leg that takes one turn starts and finishes in this turn.
+            leg = (drone.label, origin, moved_to.name, conn_name)
+            outcomes.append(Departure(*leg))
+            outcomes.append(Arrival(*leg))
+            movements.append((drone.label, moved_to.name))
             self._emit(
                 AgentMoved(
                     turn_number,

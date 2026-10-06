@@ -45,7 +45,10 @@ class Arrival(TurnOutcome):
 @dataclass(frozen=True)
 class Reroute(TurnOutcome):
     """`aircraft`, waiting at `hub`, replaced its remaining route. Both
-    routes are the hubs after `hub`, up to the destination."""
+    routes are the remaining steps of the aircraft's plan after `hub`, up
+    to the destination. A wait planned by the initial cooperative plan is a
+    step that stays in the same hub, so `old_route` may repeat a hub;
+    reroutes never plan waits."""
 
     aircraft: str
     hub: str

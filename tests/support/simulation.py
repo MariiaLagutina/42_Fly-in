@@ -86,11 +86,11 @@ def run_simulation(
     simulator = Simulator(
         graph, nb_aircraft, dispatcher, weather=weather, policy=policy
     )
-    turns = simulator.run()
+    results = simulator.run()
     # Assignment-style output, like the CLI: a turn with nothing to show
     # prints no line.
     visualizer = Visualizer(graph)
-    lines = [visualizer.render_turn(turn) for turn in turns]
+    lines = [visualizer.render_turn(result) for result in results]
     return SimulationRun(
         graph,
         nb_aircraft,
