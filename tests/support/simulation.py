@@ -91,7 +91,8 @@ def run_simulation(
         nb_aircraft,
         simulator,
         recorder.events,
-        [turn.to_output_line() for turn in turns],
+        # Assignment-style output, like the CLI: only turns with a movement.
+        [turn.to_output_line() for turn in turns if turn.movements],
     )
 
 

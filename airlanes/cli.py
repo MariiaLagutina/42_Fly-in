@@ -100,7 +100,9 @@ def main() -> None:
         else []
     )
     for index, turn in enumerate(turns):
-        print(visualizer.render_turn(turn))
+        # Assignment-style output prints only turns with a movement.
+        if turn.movements:
+            print(visualizer.render_turn(turn))
         if index < len(capacity_blocks):
             for line in capacity_blocks[index]:
                 print(line)

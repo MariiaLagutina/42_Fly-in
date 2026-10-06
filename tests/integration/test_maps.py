@@ -100,6 +100,17 @@ def test_map_meets_its_turn_budget(relative_path: str, budget: int) -> None:
 
 
 @pytest.mark.parametrize("map_file", MAP_FILES, ids=map_id)
+def test_result_keeps_every_turn(map_file: Path) -> None:
+    """The run finishes, so every started turn completed and must be in
+    the result (ADR-023), including turns without movement."""
+    run = simulate(map_id(map_file))
+
+    assert [turn.turn_number for turn in run.simulator.turns] == list(
+        range(1, run.turn_count + 1)
+    )
+
+
+@pytest.mark.parametrize("map_file", MAP_FILES, ids=map_id)
 def test_simulation_without_weather_is_deterministic(map_file: Path) -> None:
     first = simulate(map_id(map_file))
     second = simulate(map_id(map_file))
