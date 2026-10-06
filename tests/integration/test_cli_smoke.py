@@ -30,3 +30,18 @@ def test_linear_map_runs_to_completion() -> None:
     assert result.returncode == 0
     assert result.stderr == ""
     assert result.stdout == EXPECTED_STDOUT
+
+
+def test_package_entry_point_runs_the_same_cli() -> None:
+    result = subprocess.run(
+        [sys.executable, "-m", "airlanes", str(MAP_FILE)],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert result.stderr == ""
+    assert result.stdout == EXPECTED_STDOUT
