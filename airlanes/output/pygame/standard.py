@@ -221,11 +221,18 @@ class DroneSimulationWindow:
         self.screen.blit(move_title, (25, 80))
 
         if not frame.movements:
-            initial_surface = self.text_font.render(
-                "Initial state (all drones at base)", True, UIColors.TEXT_MUTED
+            # Only frame 0 is the state before the first turn; a later turn
+            # can complete without a departure or an arrival (BUG-010).
+            caption = (
+                "Initial state (all drones at base)"
+                if frame.turn_number == 0
+                else "No departures or arrivals this turn"
             )
-            init_x = 25 + move_title.get_width() + 15
-            self.screen.blit(initial_surface, (init_x, 82))
+            caption_surface = self.text_font.render(
+                caption, True, UIColors.TEXT_MUTED
+            )
+            caption_x = 25 + move_title.get_width() + 15
+            self.screen.blit(caption_surface, (caption_x, 82))
             return
 
         start_x = 25 + move_title.get_width() + 15
