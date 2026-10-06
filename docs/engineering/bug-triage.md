@@ -40,6 +40,24 @@ Reproducers are map files. Save one as `repro.txt` and run
 `tests/support/simulation.py` (`run_simulation` + `check_invariants`) reports
 the violation precisely.
 
+### Module names in older entries
+
+Entries keep the file and method names that existed when they were
+recorded. The Architecture refactor ([ADR-022](decisions.md#adr-022)) moved
+the code into the `airlanes/` package:
+
+| In older entries | Now |
+| --- | --- |
+| `simulation.py` | `airlanes/simulation/engine.py`, with departure selection in `departures.py` and deadlock handling in `deadlock.py` |
+| `Simulator._plan_departures`, `Simulator._select_feasible_moves` | `plan_departures`, `select_feasible_moves` in `airlanes/simulation/departures.py` |
+| `pathfinder.py`, `routing_policy.py` | `airlanes/routing/pathfinder.py`, `airlanes/routing/policy.py` |
+| `parser.py` | `airlanes/mapfile.py` |
+| `weather.py`, `transport.py` | `airlanes/world/` (`TransportMode` in `airlanes/model/transport_mode.py`) |
+| `graph.py`, `zone.py`, `connection.py`, `drone.py` | `airlanes/model/` |
+| `events.py`, `config.py` | `airlanes/events.py`, `airlanes/config.py` |
+| `visualizers.py`, `pygame_*.py` | `airlanes/output/text.py`, `airlanes/output/pygame/` |
+| `main.py` | `airlanes/cli.py`; `main.py` still runs it |
+
 ## Summary
 
 | ID | Title | Status | Severity | Area |
@@ -260,12 +278,14 @@ schedule, so they are written as tests in `tests/unit/test_simulation.py`:
 
 **Reproducers with weather (historical).** Before PR #9 these hung. Since
 PR #9 they finish after 157 and 116 turns, and since PR #10 after 13 and 18.
-To run them, save a map as `repro.txt` and run it with its seed:
+To run them, save a map as `repro.txt` and this script as `repro.py` in the
+repository root, set the map's seed, and run
+`uv run --locked python3 repro.py`:
 
 ```python
-from parser import Parser
-from simulation import Simulator
-from weather import RandomWeather
+from airlanes.mapfile import Parser
+from airlanes.simulation.engine import Simulator
+from airlanes.world.weather import RandomWeather
 
 graph, nb_aircraft = Parser().parse("repro.txt")
 weather = RandomWeather(graph, seed=SEED)  # 2287 for A, 5953 for B
