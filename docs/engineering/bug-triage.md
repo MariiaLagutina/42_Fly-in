@@ -69,6 +69,7 @@ the code into the `airlanes/` package:
 | [BUG-005](#bug-005) | Capacity blocks are attached to the wrong turns after a turn without movement | `VERIFIED` | Low | Command-line output |
 | [BUG-006](#bug-006) | The command line exits with status 0 after an error | `VERIFIED` | Medium | Command line |
 | [BUG-007](#bug-007) | Some invalid input ends in a traceback instead of an error message | `VERIFIED` | Medium | Map parser and command line |
+| [BUG-008](#bug-008) | `--visual` colors a departure on a reverse-declared lane like its origin | `VERIFIED` | Low | Command-line output |
 
 ---
 
@@ -589,6 +590,64 @@ connection: start-goal [max_link_capacity=²]
 Other strictness questions of the map format, such as hyphens in hub names,
 self-loops, unknown metadata keys, and the file encoding, are not part of
 this fix.
+
+---
+
+## BUG-008
+
+### `--visual` colors a departure on a reverse-declared lane like its origin
+
+| Field | Value |
+| --- | --- |
+| Status | `VERIFIED` |
+| Severity | Low |
+| Affected area | `airlanes/output/text.py`: `Visualizer._format_movement` |
+| Discovered during | Output & event audit, 2026-10-06; measured during the Bugs & Cleanup audit, 2026-10-06 |
+| Resolution | Fixed in PR #17: every token is colored by the destination hub of the outcome it shows |
+| Regression test | `test_a_departure_is_colored_by_its_destination` in `tests/unit/test_text_output.py`, for both declaration orders of the lane. The reverse-declared case fails before the fix. |
+| Verification | Full suite passes. Text without color is unchanged everywhere, and so is command-line output for every bundled map in every text mode. In the measured corpus, exactly the 9 tokens listed below change color. |
+| Related PR | PR #17 |
+
+**Violated expected behavior.** A movement token is colored by the hub
+the leg goes to. The order in which the map declares a lane never decides
+the color.
+
+**Observed behavior.** A departure token shows the lane name, for example
+`D1-goal-start`. Its color came from the last hub in that name, which is
+the second hub of the lane's declaration. For an aircraft flying against
+the declaration order, that is the hub it leaves. Arrival tokens show a
+hub and were colored correctly.
+
+**Reproducer.**
+
+```txt
+nb_drones: 1
+start_hub: start 0 0 [color=red]
+end_hub: goal 1 0 [color=blue]
+connection: goal-start [distance=900km]
+```
+
+With `--visual`, turn 1 printed `D1-goal-start` in red, the color of
+`start`, instead of blue. Declared as `start-goal`, it was blue.
+
+**Scope (measured).** In 372 runs of the bundled maps, without weather
+and with 30 weather seeds each, 1,135 of 7,366 departures on legs of more
+than one turn used a reverse-declared lane. Only 9 of those tokens
+rendered differently: many hub colors give the same terminal color, and
+the hub colors of the bonus maps are city names with no terminal color at
+all. All 9 are on `challenger/01_the_impossible_dream.txt` with weather
+seeds 5 and 21. Without weather, which is how the command line runs the
+text modes, no bundled map changes. An earlier estimate of 883 affected
+tokens compared color names, not the rendered output.
+
+**Root cause (confirmed).** `_format_movement` received only the token
+text. For a lane token it guessed the hub with `split("-")[-1]` on the
+lane name.
+
+**Fix.** The renderer receives the outcome itself and colors the token by
+its `destination`. The lane name is only the displayed position. Which
+outcomes are shown, including a one-turn leg shown once by its arrival,
+is decided in one place for both `movement_tokens` and the renderer.
 
 ---
 
