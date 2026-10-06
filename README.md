@@ -292,6 +292,7 @@ airlanes/
 ├── routing/              initial plan, route search, routing policy
 ├── simulation/           turn engine, departures, deadlocks
 ├── events.py             typed events and the dispatcher
+├── results.py            results of completed turns
 ├── output/               text output, Pygame viewers and their images
 └── config.py             speeds, weather penalties, cost weights
 ```
@@ -303,10 +304,10 @@ map file → mapfile.Parser → Graph (hubs, lanes)
                                ↓
               simulation.Simulator ← WeatherProvider → WeatherState
               (departures, deadlock)
-                               ↓
-                        EventDispatcher
-              ↙          ↓          ↓           ↘
-          text      flight log    Pygame    dispatch center
+                 ↓                              ↓
+     results.TurnResult per turn         EventDispatcher
+                 ↓                   ↙       ↓       ↓       ↘
+        text (assignment)    flight log  capacity  Pygame  dispatch center
 ```
 
 | Package or module | Responsibility |
@@ -317,6 +318,7 @@ map file → mapfile.Parser → Graph (hubs, lanes)
 | `routing` | Cooperative space-time planning, reroute search, and route cost (`pathfinder`); routing limits such as the consecutive-road budget (`policy`) |
 | `simulation` | Turn execution and route reconsideration (`engine`), departures under lane and hub capacity (`departures`), and deadlock resolution (`deadlock`) |
 | `events` | Typed events and the dispatcher |
+| `results` | Immutable results of completed turns: departures, arrivals, and reroutes |
 | `output` | Text, flight log, and capacity output (`text`); Pygame viewers, their shared helpers, and images (`pygame`) |
 | `cli` | Command-line options and the choice of output |
 | `config` | Speeds, weather penalties, and cost weights |
@@ -325,8 +327,11 @@ Dependencies form an acyclic graph toward lower-level responsibilities:
 domain and configuration at the bottom, then world and routing rules,
 simulation, output, and finally CLI wiring. The simulator does not know
 which visualizer is attached, so it can run headless while the graphical
-viewers replay the same events. The exact allowed dependency directions are
-recorded in [ADR-022](docs/engineering/decisions.md#adr-022).
+viewers replay the same events. Each completed turn also yields a
+`TurnResult` with what happened in it, and the text output decides how to
+show it. The exact allowed dependency directions are recorded in
+[ADR-022](docs/engineering/decisions.md#adr-022) and
+[ADR-024](docs/engineering/decisions.md#adr-024).
 
 ## Development
 

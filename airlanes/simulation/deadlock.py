@@ -4,8 +4,8 @@ After the turn's departures are applied, the aircraft that could not leave
 are checked for a deadlock. One of them takes a way around if there is one
 now; if there is one only once the weather clears, they wait; otherwise the
 run stops with `DeadlockError`. Resolving a deadlock replaces the route of
-the aircraft that takes a way around, and returns the event that reports it
-for the simulator to emit.
+the aircraft that takes a way around, and returns the reroute together with
+the event that reports it, for the simulator to record and emit.
 """
 
 from airlanes.events import AgentRerouted
@@ -13,6 +13,7 @@ from airlanes.model.connection import Connection
 from airlanes.model.drone import Drone, DroneState
 from airlanes.model.graph import Graph
 from airlanes.model.zone import Zone
+from airlanes.results import Reroute
 from airlanes.routing.pathfinder import Pathfinder
 from airlanes.world.weather import WeatherState
 
@@ -44,14 +45,15 @@ def resolve_deadlock(
     graph: Graph,
     pathfinder: Pathfinder,
     weather: WeatherState,
-) -> AgentRerouted | None:
+) -> tuple[Reroute, AgentRerouted] | None:
     """
     Handle a structural deadlock among the aircraft that could not
     leave this turn (ADR-020).
 
     The first aircraft of the deadlock, in aircraft order, that has a
     route under the current weather avoiding the hub it waits for takes
-    it: its `path` is replaced, and the reroute event is returned. If none
+    it: its `path` is replaced, and the reroute is returned with its
+    event, both built before the old route is lost. If none
     has one now, but one would exist with every lane open, the aircraft
     wait: that check is not a forecast, only a probe of whether the
     topology and the routing policy leave a way out once a temporary
@@ -72,13 +74,15 @@ def resolve_deadlock(
     for drone in deadlocked:
         route = _route_around(pathfinder, drone, end_zone, weather)
         if route is not None:
+            hub = drone.current_zone.name
+            old_route = tuple(zone.name for zone in drone.path)
+            new_route = tuple(zone.name for zone in route)
             drone.path = route
-            return AgentRerouted(
-                turn_number,
-                drone.label,
-                drone.current_zone.name,
-                tuple(zone.name for zone in route),
-                "deadlock",
+            return (
+                Reroute(drone.label, hub, old_route, new_route),
+                AgentRerouted(
+                    turn_number, drone.label, hub, new_route, "deadlock"
+                ),
             )
 
     if any(

@@ -26,6 +26,7 @@ named by their scope, not by a predicted pull request number.
 | [DECISION-009](#decision-009) | Can two connections, such as air and road, join the same pair of hubs? | `OPEN` | — |
 | [DECISION-010](#decision-010) | Should an aircraft move to an intermediate hub when no route to its destination is available? | `OPEN` | — |
 | [DECISION-011](#decision-011) | Should a restricted hub add travel time on lanes with a distance? | `OPEN` | — |
+| [DECISION-012](#decision-012) | Should the movement events and `TurnFinished.movements` be derived from turn results, or replaced by them? | `OPEN` | — |
 
 ---
 
@@ -623,3 +624,54 @@ error for `zone=restricted` on hubs reached by distance lanes.
 - The invariant checker, which enforces restricted transit time only on
   lanes without a distance.
 - The README and the transport test that asserts the current behavior.
+
+---
+
+## DECISION-012
+
+### Should the movement events and `TurnFinished.movements` be derived from turn results, or replaced by them?
+
+- **Status:** `OPEN`
+- **To be decided in:** a step after the turn result model
+  ([ADR-024](decisions.md#adr-024)), once its coupling has been reviewed.
+
+**Context.** Turn results and events are produced from the same facts at
+the same points of a turn. Three descriptions of a move now exist:
+
+- `Departure`, `Arrival`, and `Reroute` in each `TurnResult`;
+- the events `AgentInTransit`, `AgentMoved`, and `AgentRerouted`;
+- `TurnFinished.movements`: `(aircraft, position)` pairs in the format of
+  the original assignment, which the engine builds alongside the outcomes.
+  The same hub-or-lane rule therefore exists twice, in the engine and in
+  `output.text.movement_tokens`.
+
+**Current behavior.** The duplication is intentional. A test checks, for
+every bundled map with and without weather, that each turn's outcomes match
+its events in order and that `movement_tokens` of each result equals
+`TurnFinished.movements`.
+
+**Possible options.**
+
+1. Keep all three: events stay a complete live view, and results stay the
+   batch view.
+2. Remove `TurnFinished.movements`, or build it from the turn's outcomes,
+   so that the hub-or-lane rule exists only in the output.
+3. Let events carry outcomes instead of their own move fields.
+
+**Impact.**
+
+- The standard Pygame viewer draws from `TurnFinished.movements`; the
+  flight log, the dispatch center, and the standard viewer read the
+  movement events.
+- The invariant checker rebuilds the simulation from events alone
+  ([ADR-004](decisions.md#adr-004)). Events derived from results would no
+  longer be an independent check of them.
+- Anything that later consumes events outside the application.
+
+**Evidence needed.**
+
+- Which event consumers use each field, and whether any of them need the
+  assignment's format.
+- Whether events built from outcomes would keep their current timing: a
+  move is reported as it happens, while a result exists only once the turn
+  completes.

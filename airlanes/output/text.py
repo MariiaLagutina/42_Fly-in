@@ -6,7 +6,34 @@ from airlanes.events import (
     TurnStarted,
 )
 from airlanes.model.graph import Graph
-from airlanes.simulation.engine import SimulationTurn
+from airlanes.results import Arrival, Departure, TurnResult
+
+
+def movement_tokens(result: TurnResult) -> tuple[tuple[str, str], ...]:
+    """
+    The movements of a turn in the assignment's format, as (aircraft,
+    position) pairs in the order the outcomes happened. An aircraft that
+    starts a leg is shown on its lane, one that finishes a leg in the hub it
+    reached. A leg that starts and finishes in the same turn is shown once,
+    by its arrival. Reroutes are not shown.
+    """
+    arrived = {
+        (outcome.aircraft, outcome.origin, outcome.destination, outcome.lane)
+        for outcome in result.outcomes
+        if isinstance(outcome, Arrival)
+    }
+    tokens: list[tuple[str, str]] = []
+    for outcome in result.outcomes:
+        if isinstance(outcome, Arrival):
+            tokens.append((outcome.aircraft, outcome.destination))
+        elif isinstance(outcome, Departure) and (
+            outcome.aircraft,
+            outcome.origin,
+            outcome.destination,
+            outcome.lane,
+        ) not in arrived:
+            tokens.append((outcome.aircraft, outcome.lane))
+    return tuple(tokens)
 
 
 class Visualizer:
@@ -14,10 +41,10 @@ class Visualizer:
         self.graph = graph
         self.use_color = use_color
 
-    def render_turn(self, turn: SimulationTurn) -> str:
+    def render_turn(self, result: TurnResult) -> str:
         return " ".join(
             self._format_movement(drone_label, destination)
-            for drone_label, destination in turn.movements
+            for drone_label, destination in movement_tokens(result)
         )
 
     def _format_movement(self, drone_label: str, destination: str) -> str:

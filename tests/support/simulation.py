@@ -35,6 +35,8 @@ from airlanes.events import (
 from airlanes.model.graph import Graph
 from airlanes.model.transport_mode import TransportMode
 from airlanes.model.zone import ZoneType
+from airlanes.output.text import Visualizer, movement_tokens
+from airlanes.results import Arrival, Departure, Reroute
 from airlanes.routing.policy import RoutingPolicy
 from airlanes.simulation.engine import Simulator
 from airlanes.world.weather import WeatherProvider
@@ -85,14 +87,17 @@ def run_simulation(
     simulator = Simulator(
         graph, nb_aircraft, dispatcher, weather=weather, policy=policy
     )
-    turns = simulator.run()
+    results = simulator.run()
+    # Assignment-style output, like the CLI: a turn with nothing to show
+    # prints no line.
+    visualizer = Visualizer(graph)
+    lines = [visualizer.render_turn(result) for result in results]
     return SimulationRun(
         graph,
         nb_aircraft,
         simulator,
         recorder.events,
-        # Assignment-style output, like the CLI: only turns with a movement.
-        [turn.to_output_line() for turn in turns if turn.movements],
+        [line for line in lines if line],
     )
 
 
@@ -387,3 +392,94 @@ def delivery_turns(run: SimulationRun) -> dict[str, int]:
         for event in run.events
         if isinstance(event, AgentMoved) and event.delivered
     }
+
+
+def check_outcomes_against_events(run: SimulationRun) -> list[str]:
+    """
+    Compare the turn results with the event stream of the same run and
+    return every disagreement; empty if none (ADR-024, DECISION-012).
+
+    Both describe the same facts until the event contract is decided, so
+    they must agree turn by turn and in order:
+
+    - `AgentInTransit` is a `Departure`. `AgentMoved` after it is the
+      `Arrival` of that leg; any other `AgentMoved` is a one-turn leg, a
+      `Departure` followed by an `Arrival`.
+    - `AgentRerouted` is a `Reroute` at the same hub with the same new
+      route; events do not carry the old route, so it is only checked to
+      differ from the new one.
+    - The assignment tokens of each result equal `TurnFinished.movements`.
+    """
+    problems: list[str] = []
+    finished = {
+        event.turn_number: event.movements
+        for event in run.events
+        if isinstance(event, TurnFinished)
+    }
+    results = run.simulator.turns
+    if [result.turn_number for result in results] != sorted(finished):
+        problems.append("results and TurnFinished cover different turns")
+
+    expected: dict[int, list[object]] = {}
+    lanes_in_flight: dict[str, str] = {}
+    for event in run.events:
+        here = expected.setdefault(event.turn_number, [])
+        if isinstance(event, AgentInTransit):
+            lanes_in_flight[event.agent_label] = event.connection
+            here.append(
+                Departure(
+                    event.agent_label,
+                    event.origin,
+                    event.destination,
+                    event.connection,
+                )
+            )
+        elif isinstance(event, AgentMoved):
+            lane = lanes_in_flight.pop(event.agent_label, None)
+            leg = (
+                event.agent_label,
+                event.origin,
+                event.destination,
+                lane or _lane_between(run.graph, event.origin,
+                                      event.destination),
+            )
+            if lane is None:
+                here.append(Departure(*leg))
+            here.append(Arrival(*leg))
+        elif isinstance(event, AgentRerouted):
+            here.append((event.agent_label, event.hub, event.route))
+
+    for result in results:
+        actual: list[object] = []
+        for outcome in result.outcomes:
+            if isinstance(outcome, Reroute):
+                if outcome.old_route == outcome.new_route:
+                    problems.append(
+                        f"turn {result.turn_number}: {outcome.aircraft} "
+                        "reroute keeps its route"
+                    )
+                actual.append(
+                    (outcome.aircraft, outcome.hub, outcome.new_route)
+                )
+            else:
+                actual.append(outcome)
+        if actual != expected.get(result.turn_number, []):
+            problems.append(
+                f"turn {result.turn_number}: outcomes {actual} do not match "
+                f"events {expected.get(result.turn_number, [])}"
+            )
+        tokens = movement_tokens(result)
+        if tokens != finished.get(result.turn_number):
+            problems.append(
+                f"turn {result.turn_number}: tokens {tokens} differ from "
+                f"TurnFinished {finished.get(result.turn_number)}"
+            )
+    return problems
+
+
+def _lane_between(graph: Graph, origin: str, destination: str) -> str:
+    connection = graph.get_connection(
+        graph.zones[origin], graph.zones[destination]
+    )
+    assert connection is not None
+    return connection.name()

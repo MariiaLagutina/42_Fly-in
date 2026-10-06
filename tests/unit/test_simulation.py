@@ -13,6 +13,7 @@ from airlanes.events import AgentInTransit, AgentRerouted, WeatherChanged
 from airlanes.model.graph import Graph
 from airlanes.model.transport_mode import TransportMode
 from airlanes.model.zone import ZoneType
+from airlanes.results import Arrival, Departure, Reroute, TurnResult
 from airlanes.simulation.deadlock import DeadlockError
 from airlanes.simulation.engine import Simulator
 from airlanes.world.weather import ScriptedWeather, WeatherCondition
@@ -45,6 +46,25 @@ def test_single_aircraft_on_a_linear_route() -> None:
 
     assert check_invariants(run) == []
     assert run.output == ["D1-a", "D1-goal"]
+
+
+def test_a_one_turn_leg_is_a_departure_and_an_arrival() -> None:
+    """A leg that takes one turn starts and finishes in the same turn; the
+    assignment output still shows it once, as `D1-a`."""
+    graph = build_graph(
+        [start_hub(), hub("a"), end_hub()],
+        [Link("start", "a"), Link("a", "goal")],
+    )
+
+    results = Simulator(graph, 1).run()
+
+    assert results[0] == TurnResult(
+        1,
+        (
+            Departure("D1", "start", "a", "start-a"),
+            Arrival("D1", "start", "a", "start-a"),
+        ),
+    )
 
 
 def test_restricted_hub_takes_two_turns_to_enter() -> None:
@@ -323,6 +343,31 @@ def test_closed_first_leg_on_turn_one_causes_a_reroute() -> None:
         AgentRerouted(1, "D1", "start", ("b", "goal"), "weather")
     ]
     assert departure_turns(run)[0] == 1
+    assert run.simulator.turns[0].outcomes == (
+        Reroute("D1", "start", ("a", "goal"), ("b", "goal")),
+        Departure("D1", "start", "b", "start-b"),
+    )
+
+
+def test_outcomes_keep_the_order_of_the_turn() -> None:
+    """On turn 3, D2 reaches `b` while the storm on `a-goal` makes D1
+    reroute at `a` and leave on its new route: arrivals from earlier legs
+    come first, then reroutes, then departures."""
+    weather = ScriptedWeather({3: {"a-goal": STORM}})
+
+    run = run_simulation(two_air_routes(), 2, weather)
+
+    assert check_invariants(run) == []
+    outcomes = run.simulator.turns[2].outcomes
+    assert [type(outcome) for outcome in outcomes] == [
+        Arrival, Reroute, Departure
+    ]
+    reroute, departure = outcomes[1], outcomes[2]
+    assert isinstance(reroute, Reroute)
+    assert isinstance(departure, Departure)
+    assert departure.aircraft == reroute.aircraft
+    assert departure.origin == reroute.hub
+    assert departure.destination == reroute.new_route[0]
 
 
 def test_aircraft_waits_while_no_route_is_usable() -> None:
@@ -558,17 +603,35 @@ def test_fresh_road_budget_allows_the_same_detour() -> None:
 
 def test_every_completed_turn_is_in_the_result() -> None:
     """A 900 km air leg takes 3 turns; on turn 2 the aircraft is still in
-    the air and nothing moves, but the turn is still part of the result."""
+    the air and nothing happens, but the turn is still part of the result."""
     graph = build_graph(
         [start_hub(), end_hub()], [Link("start", "goal", distance=900)]
     )
 
-    turns = Simulator(graph, 1).run()
+    results = Simulator(graph, 1).run()
 
-    assert [turn.turn_number for turn in turns] == [1, 2, 3]
-    assert turns[0].movements == [("D1", "start-goal")]
-    assert turns[1].movements == []
-    assert turns[2].movements == [("D1", "goal")]
+    assert results == [
+        TurnResult(1, (Departure("D1", "start", "goal", "start-goal"),)),
+        TurnResult(2, ()),
+        TurnResult(3, (Arrival("D1", "start", "goal", "start-goal"),)),
+    ]
+
+
+def test_the_last_turn_is_kept_at_the_turn_limit() -> None:
+    """The lane never reopens: turn 10,000 completes and is kept, then the
+    run stops."""
+    graph = build_graph(
+        [start_hub(), end_hub()], [Link("start", "goal", distance=450)]
+    )
+    weather = ScriptedWeather({1: {"start-goal": STORM}})
+    simulator = Simulator(graph, 1, weather=weather)
+
+    with pytest.raises(RuntimeError, match="10000 turns"):
+        simulator.run()
+
+    assert [result.turn_number for result in simulator.turns] == list(
+        range(1, 10001)
+    )
 
 
 # --- Regression: hub capacity (BUG-001, BUG-002) ----------------------------
@@ -847,6 +910,9 @@ def test_deadlock_after_reroutes_is_resolved_by_a_way_around() -> None:
     assert deadlock_reroutes(run) == [
         AgentRerouted(7, "D2", "h2", ("E",), "deadlock")
     ]
+    assert Reroute("D2", "h2", ("h3", "E"), ("E",)) in (
+        run.simulator.turns[6].outcomes
+    )
 
 
 def road_budget_trap() -> Graph:
@@ -879,6 +945,20 @@ def test_deadlock_without_a_way_around_stops_the_run() -> None:
     assert error.value.turn_number == 8
     assert error.value.aircraft == ("D1", "D2")
     assert error.value.hubs == ("h0", "h2")
+
+
+def test_turns_before_a_deadlock_are_kept() -> None:
+    """The turn that raises `DeadlockError` did not complete and is not
+    kept; the turns before it are."""
+    weather = ScriptedWeather({4: {"E-h1": WeatherCondition.SNOW}})
+    simulator = Simulator(road_budget_trap(), 2, weather=weather)
+
+    with pytest.raises(DeadlockError):
+        simulator.run()
+
+    assert [result.turn_number for result in simulator.turns] == list(
+        range(1, 8)
+    )
 
 
 def test_waiting_for_weather_is_not_a_deadlock() -> None:
