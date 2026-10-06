@@ -34,8 +34,9 @@ text; the superseding ADR states what it replaces.
 | [ADR-019](#adr-019) | One capacity model; committed claims are the only live reservations | Accepted |
 | [ADR-020](#adr-020) | Structural deadlocks are detected each turn and resolved or reported | Accepted |
 | [ADR-021](#adr-021) | Weather that slows a route triggers its reconsideration; route cost is the transport travel time | Accepted |
-| [ADR-022](#adr-022) | Package structure and layer boundaries | Accepted |
-| [ADR-023](#adr-023) | The simulation result keeps every completed turn; the output decides what to print | Accepted |
+| [ADR-022](#adr-022) | Package structure and layer boundaries | Accepted; partly superseded by [ADR-024](#adr-024) |
+| [ADR-023](#adr-023) | The simulation result keeps every completed turn; the output decides what to print | Accepted; partly superseded by [ADR-024](#adr-024) |
+| [ADR-024](#adr-024) | Turn results are typed outcomes of completed turns | Accepted |
 
 ---
 
@@ -1187,7 +1188,9 @@ per design):
 
 ### Package structure and layer boundaries
 
-- **Status:** Accepted
+- **Status:** Accepted; partly superseded by [ADR-024](#adr-024) (the
+  dependencies of `output` and `simulation` on the new `results` module,
+  and what `resolve_deadlock` returns)
 - **Date:** 2026-10-06
 
 **Context.** All application code lived in seventeen flat modules at the
@@ -1344,7 +1347,9 @@ them.
 
 ### The simulation result keeps every completed turn; the output decides what to print
 
-- **Status:** Accepted
+- **Status:** Accepted; partly superseded by [ADR-024](#adr-024) (each
+  completed turn is a `TurnResult` instead of a `SimulationTurn`; the
+  invariant and the failure boundary are unchanged)
 - **Date:** 2026-10-06
 
 **Context.** `Simulator.run()` kept a turn only if an aircraft started or
@@ -1415,3 +1420,146 @@ bundled maps, without weather and with 30 weather seeds each.
   `DeadlockError`, the kept turns are exactly the turns that finished.
 - Fixes [BUG-004](bug-triage.md#bug-004) and
   [BUG-005](bug-triage.md#bug-005).
+
+---
+
+## ADR-024
+
+### Turn results are typed outcomes of completed turns
+
+- **Status:** Accepted
+- **Date:** 2026-10-06
+
+**Context.** Since [ADR-023](#adr-023), `Simulator.run()` keeps one
+`SimulationTurn` for every completed turn. That class was a list of
+`(aircraft, position)` string pairs in the format of the original
+assignment: the second string was a hub when an aircraft arrived and a lane
+when it started a multi-turn leg, so its meaning depended on the
+assignment's format. It also formatted its own output line, and the output
+package depended on the simulation package only to read it
+([ADR-022](#adr-022)). The result described what to print, not what
+happened.
+
+**Decision.**
+
+- **Four representations, four jobs.**
+  - *Simulation state* is the full internal truth: aircraft, routes,
+    weather, occupancy. It changes every turn and is not exposed.
+  - *Events* (`airlanes.events`) are live observations sent while a turn
+    runs, including weather changes and capacity snapshots. The event
+    stream is not a complete trace of execution.
+  - *Turn results* (`airlanes.results`) are the immutable outcomes of a
+    completed turn: the significant things that actually happened.
+  - *Presentation* (`airlanes.output`) decides what to show and how, from
+    results or events.
+- **One `TurnResult` per completed turn.** `TurnResult(turn_number,
+  outcomes)` replaces `SimulationTurn`. The invariant and failure boundary
+  of ADR-023 are unchanged. A completed turn in which nothing significant
+  happened has `outcomes == ()`; that is a valid result, not a missing one.
+- **A closed vocabulary of significant facts.** An outcome is one of:
+  - `Departure(aircraft, origin, destination, lane)`: an aircraft started a
+    leg;
+  - `Arrival(aircraft, origin, destination, lane)`: an aircraft finished a
+    leg;
+  - `Reroute(aircraft, hub, old_route, new_route)`: an aircraft waiting at
+    `hub` replaced its remaining route.
+
+  A new kind of outcome needs its own decision.
+- **Not a world snapshot and not a trace.** A result contains no weather,
+  no capacity, no aircraft or network state, no reasons, no failed or
+  blocked departures, no waits, and no transit progress. It does not
+  explain why something did not happen.
+- **Departure and Arrival are symmetric.** Both name the leg completely, so
+  an arrival can be understood without finding its departure. A leg that
+  takes one turn starts and finishes in the same turn: it is a `Departure`
+  followed by an `Arrival`, so every leg that starts is a departure and
+  every leg that finishes is an arrival. Neither carries the travel time
+  or a delivery flag: a delivery is an arrival at the end hub.
+- **A reroute records the transition.** `old_route` and `new_route` are the
+  remaining steps of the plan after `hub`, as the aircraft holds them. A
+  wait planned by the initial cooperative plan is a step that stays in the
+  same hub, so `old_route` may repeat a hub; reroutes never plan waits. The
+  reason for the reroute stays in `AgentRerouted`.
+- **Names, not objects.** Aircraft are identified by their label (`D1`),
+  hubs and lanes by their names from the map. A lane name keeps the order
+  of the map file, so the direction of a leg comes from `origin` and
+  `destination`.
+- **One ordered collection.** `outcomes` holds every outcome in the order
+  it happened: arrivals of legs started earlier, reroutes for weather,
+  departures and one-turn legs, then a reroute that resolves a deadlock.
+- **A taxonomy, not behavior.** `TurnOutcome` is a plain base class with no
+  fields and no methods. The outcomes and `TurnResult` are frozen
+  dataclasses. Outcomes do not render, apply, or emit themselves;
+  consumers check their type and ignore kinds they do not use.
+- **Outcomes and events come from the same fact.** Neither is derived from
+  the other. Where the simulation changes state, it records the outcome
+  and emits the event at the same point, so event timing and order are
+  unchanged. `resolve_deadlock` returns the `Reroute` together with its
+  `AgentRerouted` event, both built before the old route is replaced.
+- **The output renders results.** `output.text.movement_tokens` turns a
+  result into the assignment's movements: a departure shows its lane, an
+  arrival its hub, a one-turn leg only its arrival, and a reroute nothing.
+  The command line and the test helper print a turn's line only when the
+  renderer returns one.
+- **Module and dependencies.** `airlanes/results.py` depends on nothing
+  else in the application. `simulation` may also depend on `results`;
+  `output` depends on `model`, `events`, and `results`, and no longer on
+  `simulation`. Other directions of ADR-022 are unchanged.
+- **Duplication accepted for now.** The engine still builds
+  `TurnFinished.movements` in the assignment's format at the same points,
+  and `AgentMoved`, `AgentInTransit`, and `AgentRerouted` still describe
+  the same facts as the outcomes. A test checks, for every bundled map
+  with and without weather, that each turn's outcomes match its events in
+  order and that the assignment tokens of each result equal
+  `TurnFinished.movements`. Whether to remove the duplication is
+  [DECISION-012](open-decisions.md#decision-012).
+
+**Rationale.**
+
+- The output needs to know what happened, not one format's view of it. A
+  hub-or-lane string forced every consumer to guess which one it got.
+- A snapshot would duplicate the simulation state and grow with it, and a
+  trace is the job of events. A result that records only what happened
+  stays small, and an empty result is meaningful.
+- Weather and capacity describe the world, not something an aircraft did,
+  so they are observed, not recorded. A wait or a refused departure is the
+  absence of an outcome; explaining it needs diagnostics that do not
+  exist yet.
+- One ordered collection keeps the order of the turn, which separate
+  collections per kind would lose. The assignment's format depends on that
+  order.
+- A base class names the vocabulary, and frozen dataclasses give value
+  equality and immutability. Keeping behavior out of the outcomes leaves
+  every decision about display or use with the consumer, so a new output
+  never changes the result model. The cost: mypy cannot check that a
+  consumer handles every kind.
+- Symmetric departure and arrival make each outcome self-contained. A
+  one-turn leg is both, so counting departures or arrivals needs no
+  special case.
+- A route change is the transition from one plan to another, so a reroute
+  needs both routes; the new route alone does not show what changed.
+- Names keep a result immutable and comparable by value. `Drone`, `Zone`,
+  and `Connection` are mutable, compare by identity, and belong to one
+  network instance, so references would show their current state, not
+  what happened.
+- Removing the duplication changes the event contract that the Pygame
+  viewers, the flight log, and the invariant checker read. That is a
+  separate decision, and the test keeps the two representations from
+  drifting apart until it is made.
+
+**Consequences.**
+
+- `SimulationTurn`, `SimulationTurn.to_output_line`, and the unused
+  `Simulator.print_results` ([TD-001](bug-triage.md#technical-debt)) are
+  removed; `Simulator.run()` and `Simulator.turns` hold `TurnResult`s.
+- The movement filter of ADR-023 is gone. The command line and the test
+  helper keep a line only when the renderer returns one, so which turns
+  are printed is decided by the renderer alone.
+- A turn with only a reroute is a non-empty result with no line in the
+  assignment-style output: 12 of the 9,368 turns of the bundled runs.
+- Verified against `main` with the behavior record of ADR-022 and the
+  movement-only comparison of ADR-023. Event streams, statuses, and
+  printed output of the 372 bundled runs and the 60,000 generated maps,
+  the command line in every text mode, the text-output snapshot, and the
+  Pygame frames are identical, also for `PYTHONHASHSEED` 1 and 2. In every
+  completed generated run, the outcomes agree with the events.

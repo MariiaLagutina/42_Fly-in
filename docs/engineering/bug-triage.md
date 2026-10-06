@@ -505,8 +505,9 @@ simulation. It is recorded so it can be removed or used deliberately later.
   `find_route` handles reroutes and the reachability check. Since PR #9,
   `find_path_bfs` is not called either: the reachability check has to
   respect the consecutive-road budget, which it does not.
-- `Simulator._path_cost`, `Simulator.print_results`, and
-  `Simulator.print_stats` are not called.
+- `Simulator._path_cost` and `Simulator.print_stats` are not called.
+  `Simulator.print_results` was removed with `SimulationTurn`
+  ([ADR-024](decisions.md#adr-024)).
 - `SimulationConfig.UNREACHABLE_COST`, `RESERVATION_PENALTY_WEIGHT`, and
   `PRIORITY_ZONE_BASE_COST` are used only by the unused methods above.
 - Resolved in PR #8: the storm/snow road penalty (`WEATHER_PENALTY_SEVERE`)
