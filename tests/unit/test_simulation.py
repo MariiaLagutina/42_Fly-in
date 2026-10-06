@@ -14,6 +14,7 @@ from airlanes.model.graph import Graph
 from airlanes.model.transport_mode import TransportMode
 from airlanes.model.zone import ZoneType
 from airlanes.simulation.deadlock import DeadlockError
+from airlanes.simulation.engine import Simulator
 from airlanes.world.weather import ScriptedWeather, WeatherCondition
 
 from tests.support.graphs import Link, build_graph, end_hub, hub, start_hub
@@ -550,6 +551,24 @@ def test_fresh_road_budget_allows_the_same_detour() -> None:
     assert reroutes(run) == [
         AgentRerouted(1, "D1", "x", ("y", "goal"), "weather")
     ]
+
+
+# --- Regression: every completed turn is kept (BUG-004, ADR-023) -------------
+
+
+def test_every_completed_turn_is_in_the_result() -> None:
+    """A 900 km air leg takes 3 turns; on turn 2 the aircraft is still in
+    the air and nothing moves, but the turn is still part of the result."""
+    graph = build_graph(
+        [start_hub(), end_hub()], [Link("start", "goal", distance=900)]
+    )
+
+    turns = Simulator(graph, 1).run()
+
+    assert [turn.turn_number for turn in turns] == [1, 2, 3]
+    assert turns[0].movements == [("D1", "start-goal")]
+    assert turns[1].movements == []
+    assert turns[2].movements == [("D1", "goal")]
 
 
 # --- Regression: hub capacity (BUG-001, BUG-002) ----------------------------

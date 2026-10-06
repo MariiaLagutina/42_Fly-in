@@ -107,7 +107,7 @@ class AirlinesVisualizer:
 
 class CapacityInfoVisualizer:
     def __init__(self) -> None:
-        self.blocks: list[tuple[str, str, str]] = []
+        self.blocks: dict[int, tuple[str, str, str]] = {}
 
     def handle(self, event: SimulationEvent) -> None:
         if not isinstance(event, CapacitySnapshot):
@@ -121,22 +121,20 @@ class CapacityInfoVisualizer:
             f"{name}={used}/{capacity}"
             for name, used, capacity in event.connection_usage
         )
-        self.blocks.append(
-            (
-                f"Turn {event.turn_number} capacity",
-                f"  zones: {zones}",
-                f"  links: {links}",
-            )
+        self.blocks[event.turn_number] = (
+            f"Turn {event.turn_number} capacity",
+            f"  zones: {zones}",
+            f"  links: {links}",
         )
 
     def render(self) -> list[str]:
         lines: list[str] = []
-        for block in self.blocks:
+        for block in self.blocks.values():
             lines.extend(block)
         return lines
 
-    def render_blocks(self) -> list[tuple[str, str, str]]:
-        return self.blocks
+    def block_for(self, turn_number: int) -> tuple[str, str, str] | None:
+        return self.blocks.get(turn_number)
 
     def _format_capacity(self, capacity: int | float) -> str:
         if capacity == float("inf"):

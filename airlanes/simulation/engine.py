@@ -101,12 +101,17 @@ class Simulator:
         return sum(zone.movement_cost() for zone in path[1:])
 
     def run(self) -> list[SimulationTurn]:
+        """
+        Every turn that completes is kept, including turns in which no
+        aircraft moves (ADR-023): turn numbers run 1, 2, ..., N without gaps.
+        A turn interrupted by an exception is not kept. Which turns are
+        printed is decided by the output, not here.
+        """
         self._assign_paths()
         turn_number = 1
         while not self._all_delivered():
             turn = self._execute_turn(turn_number)
-            if turn.movements:
-                self.turns.append(turn)
+            self.turns.append(turn)
             turn_number += 1
             if turn_number > 10000:
                 raise RuntimeError("Simulation exceeded 10000 turns.")

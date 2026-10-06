@@ -65,7 +65,8 @@ the code into the `airlanes/` package:
 | [BUG-001](#bug-001) | Hub capacity exceeded by simultaneous multi-turn arrivals | `VERIFIED` | High | Simulation execution |
 | [BUG-002](#bug-002) | Hub capacity exceeded after a rejected departure | `VERIFIED` | High | Simulation execution |
 | [BUG-003](#bug-003) | Deadlock between opposite-direction aircraft on a distance lane | `VERIFIED` | Medium | Simulation execution and planning |
-| [BUG-004](#bug-004) | Turns without printed movement are dropped from the output | `CONFIRMED` | Low | Simulation output |
+| [BUG-004](#bug-004) | Turns without movement are dropped from the simulation result | `VERIFIED` | Low | Simulation output |
+| [BUG-005](#bug-005) | Capacity blocks are attached to the wrong turns after a turn without movement | `VERIFIED` | Low | Command-line output |
 
 ---
 
@@ -381,25 +382,31 @@ detect an impossible state.
 
 ## BUG-004
 
-### Turns without printed movement are dropped from the output
+### Turns without movement are dropped from the simulation result
 
 | Field | Value |
 | --- | --- |
-| Status | `CONFIRMED` |
+| Status | `VERIFIED` |
 | Severity | Low |
 | Affected area | `simulation.py`: `Simulator.run` |
-| Discovered during | Pathfinding and simulation test audit (PR #4), 2026-10-03 |
-| Planned resolution | Not scheduled. The output format for such turns depends on [DECISION-003](open-decisions.md#decision-003). |
-| Regression test | Not yet |
-| Related PR | — |
+| Discovered during | Pathfinding and simulation test audit (PR #4), 2026-10-03; reframed during the Output & event audit, 2026-10-06 |
+| Resolution | Fixed in PR #14: the simulation result keeps every completed turn, and the output decides what to print ([ADR-023](decisions.md#adr-023)) |
+| Regression tests | `test_every_completed_turn_is_in_the_result` in `tests/unit/test_simulation.py`, and `test_result_keeps_every_turn` for every bundled map in `tests/integration/test_maps.py`. The first, and the Europe case of the second, fail before the fix. |
+| Verification | Full invariant suite passes. Event streams, simulation fingerprints, the Pygame frames, and the assignment-style text output are unchanged for the bundled maps with and without weather and for 60,000 generated maps. In every run, including the three that end in `DeadlockError`, the kept turns are exactly the turns that finished. |
+| Related PR | PR #14 |
 
-**Violated expected behavior.** Each simulated turn is represented by one
-output line, so the number of lines equals the number of turns.
+**Violated expected behavior.** Every completed turn is part of the
+simulation result, whether or not an aircraft moves in it.
 
 **Observed behavior.** A turn in which no aircraft starts or completes a move
-(for example, every aircraft is mid-way through a long air leg) produces no
-line. The printed turn count is lower than the real one. `Simulator.run()`
-returns the same reduced list, so `len(run())` also undercounts.
+(for example, every aircraft is mid-way through a long air leg) was left out
+of the list returned by `Simulator.run()`, so `len(run())` undercounted the
+turns, and every output that used the list lost the turn.
+
+This entry used to expect one printed line per turn. The assignment-style
+text output prints only turns with a movement, and whether other turns
+should be printed is a separate question,
+[DECISION-003](open-decisions.md#decision-003).
 
 **Reproducer.**
 
@@ -410,18 +417,73 @@ end_hub: goal 1 0
 connection: start-goal [distance=900km]
 ```
 
-The 900 km air leg takes 3 turns, but the output has 2 lines:
+The 900 km air leg takes 3 turns, but `Simulator.run()` returned 2: turns 1
+and 3. Turn 2, in which the aircraft is in the air, was missing.
+
+The bundled Europe map kept 33 of 34 turns, and up to 56 of 79 turns with
+weather enabled.
+
+**Root cause (confirmed).** `Simulator.run` appended a turn only
+`if turn.movements`.
+
+**Fix.** `Simulator.run` keeps every completed turn. The command line and
+the test helper that models the assignment-style output print only turns
+with a movement, so that output is unchanged.
+
+---
+
+## BUG-005
+
+### Capacity blocks are attached to the wrong turns after a turn without movement
+
+| Field | Value |
+| --- | --- |
+| Status | `VERIFIED` |
+| Severity | Low |
+| Affected area | `airlanes/cli.py`: `main`; `airlanes/output/text.py`: `CapacityInfoVisualizer` |
+| Discovered during | Output & event audit, 2026-10-06 |
+| Resolution | Fixed in PR #14: capacity blocks are found by turn number, and every completed turn is in the result ([ADR-023](decisions.md#adr-023)) |
+| Regression tests | `test_capacity_info_follows_every_turn` and `test_capacity_info_has_one_block_per_turn_in_order` in `tests/integration/test_cli_output.py`. Both fail before the fix. |
+| Verification | Full invariant suite passes. Command-line output is unchanged in every mode except `--capacity-info` on the Europe map, the only bundled map with a turn without movement when weather is off. |
+| Related PR | PR #14 |
+
+**Violated expected behavior.** With `--capacity-info`, every turn has its
+own capacity block, in turn order, including turns without a printed
+movement. A turn's movement line comes before its block.
+
+**Observed behavior.** The command line paired the printed turns with the
+capacity blocks by position. The printed turns left out turns without
+movement ([BUG-004](#bug-004)), but the blocks did not, so after the first
+such turn every line got the block of an earlier turn, and the last
+blocks were never printed. The simulation itself was correct; the numbers
+shown for the turns were not.
+
+**Reproducer.** The map of [BUG-004](#bug-004), run with
+`--capacity-info`, printed:
 
 ```txt
 D1-start-goal
+Turn 1 capacity
+  zones: start=0/inf, goal=0/inf
+  links: start-goal=1/2
 D1-goal
+Turn 2 capacity
+  zones: start=0/inf, goal=0/inf
+  links: start-goal=1/2
 ```
 
-The bundled Europe map prints 33 lines for 34 turns, and up to 56 lines for
-79 turns with weather enabled.
+`D1-goal` happens on turn 3 but got the block of turn 2, and the block of
+turn 3 was lost. On the bundled Europe map without weather, turn 4 has no
+movement: 30 of the 33 printed lines got the block of the previous turn,
+and `Turn 34 capacity` was never printed.
 
-**Root cause (confirmed).** `Simulator.run` appends a turn only
-`if turn.movements`.
+**Root cause (confirmed).** `main` printed `render_blocks()[index]` after
+the `index`-th turn of the shortened turn list.
+
+**Fix.** `CapacityInfoVisualizer` keeps its blocks by turn number, and
+`block_for(turn_number)` replaces `render_blocks()`. The command line goes
+through every completed turn and prints its movement line, if it has one,
+then its block. A turn without movement prints only its block.
 
 ---
 

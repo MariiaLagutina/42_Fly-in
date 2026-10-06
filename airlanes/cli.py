@@ -94,16 +94,16 @@ def main() -> None:
         return
 
     visualizer = Visualizer(graph, use_color=args.visual)
-    capacity_blocks = (
-        capacity_visualizer.render_blocks()
-        if capacity_visualizer is not None
-        else []
-    )
-    for index, turn in enumerate(turns):
-        print(visualizer.render_turn(turn))
-        if index < len(capacity_blocks):
-            for line in capacity_blocks[index]:
-                print(line)
+    for turn in turns:
+        # Assignment-style output prints only turns with a movement; the
+        # capacity block of every turn follows it, matched by turn number.
+        if turn.movements:
+            print(visualizer.render_turn(turn))
+        if capacity_visualizer is not None:
+            block = capacity_visualizer.block_for(turn.turn_number)
+            if block is not None:
+                for line in block:
+                    print(line)
 
 
 def _parse_args() -> argparse.Namespace:

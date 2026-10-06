@@ -17,7 +17,7 @@ named by their scope, not by a predicted pull request number.
 | --- | --- | --- | --- |
 | [DECISION-001](#decision-001) | What are the final weather travel times, and do restricted hubs affect distance-based lanes? | `DECIDED` (weather part, [ADR-021](decisions.md#adr-021); restricted hubs moved to DECISION-011) | — |
 | [DECISION-002](#decision-002) | What should an aircraft do when execution diverges from its plan? | `DECIDED` | — |
-| [DECISION-003](#decision-003) | How are turns without movement represented in the output? | `OPEN` | [BUG-004](bug-triage.md#bug-004) |
+| [DECISION-003](#decision-003) | How are turns without movement represented in the output? | `OPEN` | — |
 | [DECISION-004](#decision-004) | What makes a hub or route unsafe, and where does a weather diversion go? | `DECIDED` | — |
 | [DECISION-005](#decision-005) | How does weather emergency overflow work? | `DECIDED` (not needed) | — |
 | [DECISION-006](#decision-006) | How does routing policy compare waiting, rerouting, and diverting? | `DECIDED` (minimal policy) | — |
@@ -193,9 +193,13 @@ Details are in [dynamic-routing.md](dynamic-routing.md#evidence).
 turn and omits aircraft that do not move. On long distance-based legs a turn
 can pass in which no aircraft starts or finishes a move.
 
-**Current behavior.** Such turns are not printed, so the number of lines is
-lower than the number of simulated turns (see
-[BUG-004](bug-triage.md#bug-004)).
+**Current behavior.** The simulation result keeps every completed turn,
+including turns without movement ([ADR-023](decisions.md#adr-023)). The
+assignment-style text output prints only turns with a movement, so the
+number of lines is lower than the number of simulated turns. With
+`--capacity-info`, such a turn prints only its capacity block. The movement
+filter now belongs to the output, so any option below changes only the
+output.
 
 **Possible options.**
 
