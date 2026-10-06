@@ -70,6 +70,7 @@ the code into the `airlanes/` package:
 | [BUG-006](#bug-006) | The command line exits with status 0 after an error | `VERIFIED` | Medium | Command line |
 | [BUG-007](#bug-007) | Some invalid input ends in a traceback instead of an error message | `VERIFIED` | Medium | Map parser and command line |
 | [BUG-008](#bug-008) | `--visual` colors a departure on a reverse-declared lane like its origin | `VERIFIED` | Low | Command-line output |
+| [BUG-009](#bug-009) | The flight log calls every multi-turn departure "mid-air refueling" | `VERIFIED` | Low | Command-line output |
 
 ---
 
@@ -648,6 +649,65 @@ lane name.
 its `destination`. The lane name is only the displayed position. Which
 outcomes are shown, including a one-turn leg shown once by its arrival,
 is decided in one place for both `movement_tokens` and the renderer.
+
+---
+
+## BUG-009
+
+### The flight log calls every multi-turn departure "mid-air refueling"
+
+| Field | Value |
+| --- | --- |
+| Status | `VERIFIED` |
+| Severity | Low |
+| Affected area | `airlanes/output/text.py`: `AirlinesVisualizer` |
+| Discovered during | Output & event audit, 2026-10-06; measured during the Bugs & Cleanup audit, 2026-10-06 |
+| Resolution | Fixed in PR #18: the line says `(in transit)` |
+| Regression test | `test_flight_log_shows_a_multi_turn_departure_as_in_transit` in `tests/unit/test_text_output.py`. Fails before the fix. |
+| Verification | Full suite passes. Only `--airlines` output changes: on the bundled maps without weather, exactly 199 lines on 5 maps, each only in this suffix. Every other output mode, the simulation results, the events, and the Pygame viewers are unchanged. |
+| Related PR | PR #18 |
+
+**Violated expected behavior.** The flight log describes what the
+simulation models. `AgentInTransit` means that an aircraft has departed on
+a leg that does not finish in the same turn; the model has no refueling,
+and the output must not invent a reason why a leg takes more than one
+turn.
+
+**Observed behavior.** `--airlines` printed every departure on a leg of
+more than one turn as `D1: start -> goal via start-goal (mid-air
+refueling)`. The wording was deliberate in the original aircraft-only
+version, where a leg of more than one turn was presented as a refueling
+stop. It became inaccurate as the model evolved: such a leg now takes
+several turns because of its distance, transport mode, weather at
+departure, or the two-turn rule for restricted hubs, and road legs exist.
+On the bundled maps without weather, 199 lines used it: 69 air legs with
+a distance, 120 entries into restricted hubs over lanes without a
+distance, and 10 road legs on the Germany map.
+
+**Reproducer.**
+
+```txt
+nb_drones: 1
+start_hub: start 0 0
+end_hub: goal 1 0
+connection: start-goal [distance=150km mode=road]
+```
+
+With `--airlines`, turn 1 printed
+`D1: start -> goal via start-goal (mid-air refueling)` for a road leg.
+
+**Root cause (confirmed).** A fixed suffix in `AirlinesVisualizer`, kept
+from the aircraft-only version.
+
+**Fix.** The line says `(in transit)`, for every transport mode. The
+flight log still shows no line on the turns between a departure and its
+arrival; the README now describes the log as departures on legs of more
+than one turn and arrivals, by turn.
+
+**Related finding, not fixed here.** A delivery is shown as `(landed)`
+whatever the transport mode, so a road leg into the end hub also
+"lands". No bundled map has such a delivery. It concerns the wording of
+arrivals and is left for a separate change.
 
 ---
 

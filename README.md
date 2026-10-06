@@ -78,7 +78,7 @@ Both accept one map file and these options:
 | --- | --- |
 | _(none)_ | Compact text: one line per turn, one `D<n>-<destination>` token per moving aircraft |
 | `--visual` | The same text, colored with ANSI codes from the map's hub colors |
-| `--airlines` | Readable flight log: departures, legs in progress, arrivals |
+| `--airlines` | Readable flight log: departures on legs of more than one turn and arrivals, by turn |
 | `--capacity-info` | Adds per-turn hub and lane usage, for example `Hamburg=2/18` |
 | `--pygame` | Standard Pygame turn viewer for any map |
 | `--pygame-airlines` | Aviation dispatch center with dynamic weather |
