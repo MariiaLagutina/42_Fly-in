@@ -132,8 +132,7 @@ class AirlinesVisualizer:
         elif isinstance(event, AgentInTransit):
             self._current_turn_lines.append(
                 f"  {event.agent_label}: {event.origin} -> "
-                f"{event.destination} via {event.connection} "
-                "(mid-air refueling)"
+                f"{event.destination} via {event.connection} (in transit)"
             )
         elif isinstance(event, AgentMoved):
             label = "landed" if event.delivered else "arrived"
