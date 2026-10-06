@@ -67,6 +67,8 @@ the code into the `airlanes/` package:
 | [BUG-003](#bug-003) | Deadlock between opposite-direction aircraft on a distance lane | `VERIFIED` | Medium | Simulation execution and planning |
 | [BUG-004](#bug-004) | Turns without movement are dropped from the simulation result | `VERIFIED` | Low | Simulation output |
 | [BUG-005](#bug-005) | Capacity blocks are attached to the wrong turns after a turn without movement | `VERIFIED` | Low | Command-line output |
+| [BUG-006](#bug-006) | The command line exits with status 0 after an error | `VERIFIED` | Medium | Command line |
+| [BUG-007](#bug-007) | Some invalid input ends in a traceback instead of an error message | `VERIFIED` | Medium | Map parser and command line |
 
 ---
 
@@ -484,6 +486,109 @@ the `index`-th turn of the shortened turn list.
 `block_for(turn_number)` replaces `render_blocks()`. The command line goes
 through every completed turn and prints its movement line, if it has one,
 then its block. A turn without movement prints only its block.
+
+---
+
+## BUG-006
+
+### The command line exits with status 0 after an error
+
+| Field | Value |
+| --- | --- |
+| Status | `VERIFIED` |
+| Severity | Medium |
+| Affected area | `airlanes/cli.py`: `main`; `main.py`; `airlanes/__main__.py` |
+| Discovered during | Bugs & Cleanup audit, 2026-10-06 |
+| Resolution | Fixed in PR #16: `main()` returns the exit status, and every entry point passes it to `sys.exit` |
+| Regression tests | `tests/integration/test_cli_errors.py`: one test per handled error, and `test_entry_points_pass_the_exit_status_on` for `main.py` and `python -m airlanes`. They fail before the fix. |
+| Verification | Full suite passes. Every bundled map still exits with 0 in every text mode, with byte-identical stdout and stderr. |
+| Related PR | PR #16 |
+
+**Violated expected behavior.** A run that fails exits with a non-zero
+status, so a script or a CI job can tell it from a successful one.
+
+**Observed behavior.** For a missing file, a map that cannot be parsed, a
+map without a route, `DeadlockError`, or the 10,000-turn limit, the command
+line printed the error to stderr and exited with status 0. Only invalid
+arguments, handled by `argparse`, exited with 2.
+
+**Reproducer.**
+
+```txt
+nb_drones: 1
+start_hub: start 0 0
+end_hub: goal 1 0
+hub: a 2 0
+connection: start-a
+```
+
+`main.py repro.txt` printed
+`Error: No valid route found between start and end zones.` and exited
+with 0.
+
+**Root cause (confirmed).** `main()` returned `None` after printing each
+error, and the entry points ignored it.
+
+**Fix.** `main()` returns 0 on success and 1 for every error it handles;
+`main.py`, `python -m airlanes`, and `airlanes/cli.py` itself call
+`sys.exit(main())`. Messages are unchanged.
+
+---
+
+## BUG-007
+
+### Some invalid input ends in a traceback instead of an error message
+
+| Field | Value |
+| --- | --- |
+| Status | `VERIFIED` |
+| Severity | Medium |
+| Affected area | `airlanes/mapfile.py`: numeric fields; `airlanes/cli.py`: `main` |
+| Discovered during | Map-parser audit (PR #3), 2026-10-03; registered during the Bugs & Cleanup audit, 2026-10-06 |
+| Resolution | Fixed in PR #16 |
+| Regression tests | `test_non_decimal_digits_raise_parse_error` and `test_non_decimal_population_does_not_crash` in `tests/unit/test_parser.py`; `test_a_directory_is_reported_as_an_unreadable_map` in `tests/integration/test_cli_errors.py`. They fail before the fix. |
+| Verification | Full suite passes. Every numeric value accepted before, including other Unicode decimal digits such as `５`, is still accepted. |
+| Related PR | PR #16 |
+
+**Violated expected behavior.** A map that cannot be used stops the program
+with a clear error message, not a crash (original assignment: "Any other
+parsing error must stop the program and return a clear error message").
+
+**Observed behavior.** Two cases ended in an uncaught exception with a
+traceback:
+
+- a superscript digit such as `²` in `nb_drones`, `max_drones`,
+  `max_link_capacity`, `distance`, or `population`: `ValueError`;
+- a directory given instead of a map file: `IsADirectoryError`.
+
+**Reproducer.**
+
+```txt
+nb_drones: 1
+start_hub: start 0 0
+end_hub: goal 1 0
+connection: start-goal [max_link_capacity=²]
+```
+
+**Root cause (confirmed).**
+
+- The numeric fields were checked with `str.isdigit()`, which accepts
+  superscript digits, and then converted with `int()`, which does not.
+- `main()` caught only `FileNotFoundError` among the errors of reading the
+  file.
+
+**Fix.**
+
+- The numeric fields are checked with `str.isdecimal()`, which accepts
+  exactly the digits `int()` converts. A superscript digit gives the field's
+  usual parse error with its line number. An invalid population is still
+  ignored, as before.
+- Any other `OSError` while the map file is read and parsed prints
+  `Cannot read map file: <path>: <reason>` and exits with status 1.
+
+Other strictness questions of the map format, such as hyphens in hub names,
+self-loops, unknown metadata keys, and the file encoding, are not part of
+this fix.
 
 ---
 
