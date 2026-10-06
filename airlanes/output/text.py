@@ -17,23 +17,40 @@ def movement_tokens(result: TurnResult) -> tuple[tuple[str, str], ...]:
     reached. A leg that starts and finishes in the same turn is shown once,
     by its arrival. Reroutes are not shown.
     """
+    return tuple(
+        (outcome.aircraft, _position(outcome))
+        for outcome in _shown_outcomes(result)
+    )
+
+
+def _shown_outcomes(result: TurnResult) -> list[Departure | Arrival]:
+    """The outcomes the assignment's format shows, in order: every arrival,
+    and every departure except one whose leg also finishes in this turn."""
     arrived = {
         (outcome.aircraft, outcome.origin, outcome.destination, outcome.lane)
         for outcome in result.outcomes
         if isinstance(outcome, Arrival)
     }
-    tokens: list[tuple[str, str]] = []
+    shown: list[Departure | Arrival] = []
     for outcome in result.outcomes:
         if isinstance(outcome, Arrival):
-            tokens.append((outcome.aircraft, outcome.destination))
+            shown.append(outcome)
         elif isinstance(outcome, Departure) and (
             outcome.aircraft,
             outcome.origin,
             outcome.destination,
             outcome.lane,
         ) not in arrived:
-            tokens.append((outcome.aircraft, outcome.lane))
-    return tuple(tokens)
+            shown.append(outcome)
+    return shown
+
+
+def _position(outcome: Departure | Arrival) -> str:
+    """Where the assignment's format shows the aircraft: on the lane of a
+    leg it starts, in the hub of a leg it finishes."""
+    if isinstance(outcome, Departure):
+        return outcome.lane
+    return outcome.destination
 
 
 class Visualizer:
@@ -43,18 +60,18 @@ class Visualizer:
 
     def render_turn(self, result: TurnResult) -> str:
         return " ".join(
-            self._format_movement(drone_label, destination)
-            for drone_label, destination in movement_tokens(result)
+            self._format_movement(outcome)
+            for outcome in _shown_outcomes(result)
         )
 
-    def _format_movement(self, drone_label: str, destination: str) -> str:
-        movement = f"{drone_label}-{destination}"
+    def _format_movement(self, outcome: Departure | Arrival) -> str:
+        """A token is colored by the hub its leg goes to, whatever the
+        order in which the map declares the lane (BUG-008)."""
+        movement = f"{outcome.aircraft}-{_position(outcome)}"
         if not self.use_color:
             return movement
 
-        zone = self.graph.get_zone(destination)
-        if zone is None and "-" in destination:
-            zone = self.graph.get_zone(destination.split("-")[-1])
+        zone = self.graph.get_zone(outcome.destination)
 
         if zone and zone.color == "rainbow":
             return self._apply_rainbow_effect(movement)
