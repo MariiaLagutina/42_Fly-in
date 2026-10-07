@@ -222,7 +222,8 @@ Weather is random and not seeded, so two runs of the same map can differ.
 - lanes colored by current weather, with weather icons
 - a departure board with a flight number and status for every aircraft:
   `EN ROUTE` on an air leg, `DRIVING` on a road leg, `WEATHER REROUTE` on
-  the first leg after weather changed the route, and `LANDED`
+  the first leg after weather changed the route, and, at an intermediate
+  hub, `LANDED` after an air leg or `ARRIVED` after a road leg
 - weather alerts in the sidebar
 - clicking a city prints a hub report (population, hub type, current load)
   to the terminal

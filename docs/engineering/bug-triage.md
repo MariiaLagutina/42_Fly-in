@@ -72,6 +72,8 @@ the code into the `airlanes/` package:
 | [BUG-008](#bug-008) | `--visual` colors a departure on a reverse-declared lane like its origin | `VERIFIED` | Low | Command-line output |
 | [BUG-009](#bug-009) | The flight log calls every multi-turn departure "mid-air refueling" | `VERIFIED` | Low | Command-line output |
 | [BUG-010](#bug-010) | The standard Pygame viewer calls a later turn without movement the initial state | `VERIFIED` | Low | Pygame output |
+| [BUG-011](#bug-011) | The dispatch board infers flight delays from the current weather | `VERIFIED` | Low | Pygame output |
+| [BUG-012](#bug-012) | Arrivals by road are described as landings | `VERIFIED` | Low | Pygame and command-line output |
 
 ---
 
@@ -865,6 +867,91 @@ to a future observability discussion of the event contract
 (DECISION-012). Deadlock reroutes and aircraft waiting at a hub get no
 status of their own: the event stream does not say why an aircraft
 waits.
+
+---
+
+## BUG-012
+
+### Arrivals by road are described as landings
+
+| Field | Value |
+| --- | --- |
+| Status | `VERIFIED` |
+| Severity | Low |
+| Affected area | `airlanes/output/pygame/airlines.py`: `AirlinesWindow._determine_flight_status`; `airlanes/output/text.py`: `AirlinesVisualizer` |
+| Discovered during | Bugs & Cleanup audit, 2026-10-06 (as a related finding of [BUG-009](#bug-009)); measured during the cleanup audit, 2026-10-07 |
+| Resolution | Fixed in PR #21: the dispatch board names the mode of the completed leg; the flight log says `(delivered)` |
+| Regression test | `test_an_aircraft_at_a_hub_is_described_by_the_leg_it_completed` (air and road) in `tests/unit/test_pygame_airlines.py`, run headless with SDL's dummy video driver; `test_flight_log_shows_arrivals_and_deliveries_without_a_transport_verb` in `tests/unit/test_text_output.py`. The road case and the flight-log test fail before the fix. |
+| Verification | Full suite passes. Simulation results, events, and the standard Pygame viewer are unchanged. Only `ARRIVED` badges and the `(delivered)` suffix change (see below). |
+| Related PR | PR #21 |
+
+**Violated expected behavior.** A status describes what happened to the
+aircraft. An aircraft that has just completed a road leg drove; it did
+not land.
+
+**Observed behavior.** Two outputs used aviation wording whatever the
+transport mode, with opposite meanings:
+
+- The dispatch board showed `LANDED` for every aircraft waiting at an
+  intermediate hub, including one that had just arrived by road. Final
+  deliveries are not on the board.
+- The `--airlines` flight log printed `(landed)` for every final delivery,
+  and `(arrived)` for every other arrival. A road leg into the end hub
+  would also have "landed".
+
+On the Germany map, the only bundled map with roads, 20 board cards
+without weather and 707 with 30 weather seeds showed `LANDED` after a road
+leg. No bundled map has a road leg into the end hub, so the flight log
+never printed `(landed)` for a road delivery there; the reproducer below
+shows it.
+
+This is independent of [BUG-009](#bug-009), which concerned departures,
+and of [BUG-011](#bug-011), which concerned the inference of delays from
+the weather.
+
+**Reproducer.**
+
+```txt
+nb_drones: 1
+start_hub: start 0 0
+hub: a 1 0
+end_hub: goal 2 0
+connection: start-a [distance=150km mode=road]
+connection: a-goal [distance=150km mode=road]
+```
+
+With `--airlines`, turn 4 printed `D1: a -> goal (landed)` for a road
+leg. With `--pygame-airlines`, turn 2 showed `LANDED` for an aircraft
+that had driven from `start` to `a`.
+
+**Root cause (confirmed).** Both outputs had one fixed word for an
+arrival, kept from the aircraft-only version. The board's `LANDED` meant
+"at an intermediate hub", whatever the leg that brought the aircraft
+there.
+
+**Fix.**
+
+- **Dispatch board.** An aircraft at an intermediate hub is described by
+  the leg it has just completed, whose hubs the card already shows:
+  `LANDED` after an air leg, `ARRIVED` after a road leg. The mode comes
+  from the graph, as for `DRIVING`; events and results are unchanged.
+- **Flight log.** A final delivery says `(delivered)`, the fact the
+  `AgentMoved` event carries; other arrivals keep `(arrived)`. The log
+  needs no transport mode and does not get the graph.
+
+The sprite drawn for an aircraft at a hub is unchanged.
+
+**Measured effect.**
+
+- Dispatch board, 12 bundled maps without weather and with 30 weather
+  seeds each: only the Germany road cards above change, from `LANDED` to
+  `ARRIVED` (20 and 707). The 42,943 cards after an air leg keep
+  `LANDED`; en-route statuses, including `WEATHER REROUTE`, are unchanged.
+- `--airlines`, 12 bundled maps: 109 lines change, each only in the
+  suffix `(landed)` → `(delivered)`; all are air deliveries. The other
+  modes are byte-identical.
+- Text-output snapshot (1,572 runs, with weather): only the flight log
+  differs, in 10,300 lines, again only in that suffix.
 
 ---
 
