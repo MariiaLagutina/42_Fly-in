@@ -293,11 +293,11 @@ def test_explicit_link_capacity_overrides_distance(
 ) -> None:
     graph, _ = parse(write_map(
         HEADER
-        + "connection: start-goal [distance=100km max_link_capacity=1]\n"
+        + "connection: start-goal [distance=600km max_link_capacity=1]\n"
     ))
 
     (connection,) = graph.connections
-    assert connection.distance == 100
+    assert connection.distance == 600
     assert connection.max_link_capacity == 1
 
 
