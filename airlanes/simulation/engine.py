@@ -65,6 +65,8 @@ class Simulator:
     def _assign_paths(self) -> None:
         if self.graph.start_zone is None or self.graph.end_zone is None:
             raise ValueError("Graph must have start and end zones.")
+        if self.graph.start_zone is self.graph.end_zone:
+            raise ValueError("Graph start and end zones must be different.")
 
         reservations: dict[tuple[str, int], int] = {}
         conn_reserv: dict[tuple[str, int], int] = {}
