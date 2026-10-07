@@ -967,7 +967,7 @@ later.
 | --- | --- |
 | Status | `VERIFIED` |
 | Discovered during | Pathfinding and simulation test audit (PR #4), 2026-10-03 |
-| Resolution | Removed in the Stage 3 dead-code cleanup, 2026-10-07 |
+| Resolution | Removed in PR #23 (Stage 3 dead-code cleanup), 2026-10-07 |
 | Regression test | Not applicable: the code is removed. `mypy --strict` and `flake8` fail on any remaining reference. |
 | Verification | Full suite passes. Simulation results on the bundled maps, command-line output, and the text-output snapshot are unchanged. |
 
@@ -995,7 +995,7 @@ The code below was never called by the simulation and has been removed:
 | --- | --- |
 | Status | `VERIFIED` |
 | Discovered during | Core unit test audit (PR #3), 2026-10-03 |
-| Resolution | Removed in the Stage 3 dead-code cleanup, 2026-10-07 |
+| Resolution | Removed in PR #23 (Stage 3 dead-code cleanup), 2026-10-07 |
 | Regression test | Not applicable: the state is removed. `mypy --strict` and `flake8` fail on any remaining reference. |
 | Verification | As for [TD-001](#td-001--unused-pathfinding-and-simulation-code). |
 
