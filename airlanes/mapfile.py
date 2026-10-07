@@ -20,6 +20,19 @@ class ParseError(Exception):
         self.message = message
 
 
+# Numbers are written with ASCII digits only; leading zeros are allowed.
+DIGITS = re.compile(r"[0-9]+")
+INTEGER = re.compile(r"-?[0-9]+")
+DISTANCE = re.compile(r"([0-9]+)km")
+
+
+def _positive_int(value: str, line_num: int, message: str) -> int:
+    """A positive whole number in ASCII digits, or a ParseError."""
+    if DIGITS.fullmatch(value) is None or int(value) <= 0:
+        raise ParseError(line_num, message)
+    return int(value)
+
+
 class Parser:
     """
     Parses a configuration file to build the graph and
@@ -107,11 +120,9 @@ class Parser:
         if len(parts) != 2:
             raise ParseError(line_num, "Invalid nb_drones format.")
 
-        value = parts[1].strip()
-        if not value.isdecimal() or int(value) <= 0:
-            raise ParseError(line_num, "nb_drones must be positive integer.")
-
-        return int(value)
+        return _positive_int(
+            parts[1].strip(), line_num, "nb_drones must be positive integer."
+        )
 
     def _parse_zone(
         self,
@@ -128,13 +139,10 @@ class Parser:
             raise ParseError(line_num, "Invalid zone format.")
 
         name = parts[1]
-        try:
-            x = int(parts[2])
-            y = int(parts[3])
-        except ValueError as exc:
-            raise ParseError(
-                line_num, "Zone coordinates must be integers."
-            ) from exc
+        if not all(INTEGER.fullmatch(part) for part in parts[2:]):
+            raise ParseError(line_num, "Zone coordinates must be integers.")
+        x = int(parts[2])
+        y = int(parts[3])
 
         zone_type_str = metadata.get("zone", "normal")
         try:
@@ -146,19 +154,21 @@ class Parser:
 
         color = metadata.get("color")
         explicit_max_drones = "max_drones" in metadata
-        max_drones_str = metadata.get("max_drones", "1")
-
-        if not max_drones_str.isdecimal() or int(max_drones_str) <= 0:
-            raise ParseError(line_num, "max_drones must be positive integer.")
-        max_drones = int(max_drones_str)
+        max_drones = _positive_int(
+            metadata.get("max_drones", "1"),
+            line_num,
+            "max_drones must be positive integer.",
+        )
 
         population = 0
         if "population" in metadata:
-            pop_str = metadata["population"]
-            if pop_str.isdecimal():
-                population = int(pop_str)
-                if not explicit_max_drones:
-                    max_drones = max(1, population // 100000)
+            population = _positive_int(
+                metadata["population"],
+                line_num,
+                "population must be positive integer.",
+            )
+            if not explicit_max_drones:
+                max_drones = max(1, population // 100000)
 
         zone = Zone(
             name=name,
@@ -204,13 +214,11 @@ class Parser:
             )
 
         explicit_max_link_capacity = "max_link_capacity" in metadata
-        capacity_str = metadata.get("max_link_capacity", "1")
-
-        if not capacity_str.isdecimal() or int(capacity_str) <= 0:
-            raise ParseError(
-                line_num, "max_link_capacity must be positive integer."
-            )
-        capacity = int(capacity_str)
+        capacity = _positive_int(
+            metadata.get("max_link_capacity", "1"),
+            line_num,
+            "max_link_capacity must be positive integer.",
+        )
 
         mode_str = metadata.get("mode", TransportMode.AIR.value)
         try:
@@ -222,12 +230,18 @@ class Parser:
 
         distance = 0
         if "distance" in metadata:
-            dist_str = metadata["distance"].replace("km", "").strip()
-            if not dist_str.isdecimal():
+            km = DISTANCE.fullmatch(metadata["distance"])
+            if km is None:
                 raise ParseError(
                     line_num, "distance must be a whole number of km."
                 )
-            distance = int(dist_str)
+            distance = int(km.group(1))
+            if distance <= 0:
+                raise ParseError(
+                    line_num,
+                    "distance must be positive; a lane without a distance "
+                    "omits it.",
+                )
 
         if mode is TransportMode.ROAD and distance <= 0:
             raise ParseError(
