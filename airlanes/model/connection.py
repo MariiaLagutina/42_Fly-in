@@ -20,7 +20,6 @@ class Connection:
         self.zone_b = zone_b
         self.max_link_capacity = max_link_capacity
         self.mode = mode
-        self.current_drones = 0
         self.distance: int = 0
         self.explicit_max_link_capacity: bool = False
 
@@ -38,10 +37,6 @@ class Connection:
             raise ValueError(
                 f"Zone {zone.name} is not connected by this connection."
             )
-
-    def has_capacity(self) -> bool:
-        """Check if the connection has capacity for another drone."""
-        return self.current_drones < self.max_link_capacity
 
     def name(self) -> str:
         """Return the name of the connection."""

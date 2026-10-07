@@ -6,7 +6,6 @@ from airlanes.model.zone import Zone
 
 class DroneState(Enum):
     WAITING = "waiting"
-    MOVING = "moving"
     IN_TRANSIT = "in_transit"
     DELIVERED = "delivered"
 
