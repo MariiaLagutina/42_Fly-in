@@ -316,6 +316,20 @@ def test_a_graph_whose_start_hub_is_its_end_hub_is_rejected() -> None:
     assert simulator.turns == []
 
 
+def test_an_end_zone_not_marked_as_an_end_hub_is_rejected() -> None:
+    """Aircraft are delivered when they reach a hub marked as an end hub.
+    If the graph's end zone is not marked, its aircraft would wait there
+    forever with an empty route; the graph is rejected before any turn."""
+    graph = build_graph([start_hub(), end_hub()], [Link("start", "goal")])
+    assert graph.end_zone is not None
+    graph.end_zone.is_end = False
+    simulator = Simulator(graph, 1)
+
+    with pytest.raises(ValueError, match="not marked as an end zone"):
+        simulator.run()
+    assert simulator.turns == []
+
+
 # --- Dynamic replanning (ADR-018, ADR-021) ----------------------------------
 # An aircraft at a hub reconsiders its route when the weather makes it slower
 # than in clear weather, a closed leg being infinitely slow. It switches only

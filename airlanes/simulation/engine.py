@@ -67,6 +67,8 @@ class Simulator:
             raise ValueError("Graph must have start and end zones.")
         if self.graph.start_zone is self.graph.end_zone:
             raise ValueError("Graph start and end zones must be different.")
+        if not self.graph.end_zone.is_end:
+            raise ValueError("Graph end zone is not marked as an end zone.")
 
         reservations: dict[tuple[str, int], int] = {}
         conn_reserv: dict[tuple[str, int], int] = {}
