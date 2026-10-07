@@ -139,7 +139,6 @@ class Parser:
             is_end=is_end,
         )
         zone.population = population
-        zone.explicit_max_drones = explicit_max_drones
 
         return zone
 
@@ -206,7 +205,6 @@ class Parser:
 
         connection = Connection(zone_a, zone_b, capacity, mode)
         connection.distance = distance
-        connection.explicit_max_link_capacity = explicit_max_link_capacity
 
         return connection
 

@@ -21,7 +21,6 @@ class Connection:
         self.max_link_capacity = max_link_capacity
         self.mode = mode
         self.distance: int = 0
-        self.explicit_max_link_capacity: bool = False
 
     def connects(self, zone: "Zone") -> bool:
         """Check if the connection connects to the given zone."""

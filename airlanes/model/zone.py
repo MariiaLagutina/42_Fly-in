@@ -33,7 +33,6 @@ class Zone:
         self.is_start = is_start
         self.is_end = is_end
         self.population: int = 0
-        self.explicit_max_drones: bool = False
 
     def movement_cost(self) -> int:
         """Return movement cost for entering the zone."""
