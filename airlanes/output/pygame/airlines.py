@@ -508,20 +508,22 @@ class AirlinesWindow:
         says nothing about a leg already under way (BUG-011). A weather
         reroute only states that weather changed the route, not that
         delivery is later.
+
+        An aircraft at an intermediate hub is described by the leg it has
+        just completed, whose hubs the card shows: it landed after an air
+        leg and arrived after a road leg.
         """
+        on_road = self._is_road_segment(info["origin"], info["dest"])
         if info["status"] != "En Route":
+            if on_road:
+                return "ARRIVED", UIColors.YELLOW
             return "LANDED", UIColors.YELLOW
 
         if drone_label in self.weather_rerouted_legs:
             return "WEATHER REROUTE", UIColors.ORANGE
 
-        zone_a = self.graph.get_zone(info["origin"])
-        zone_b = self.graph.get_zone(info["dest"])
-
-        if zone_a and zone_b:
-            conn = self.graph.get_connection(zone_a, zone_b)
-            if conn and conn.mode is TransportMode.ROAD:
-                return "DRIVING", UIColors.BLUE
+        if on_road:
+            return "DRIVING", UIColors.BLUE
 
         return "EN ROUTE", UIColors.GREEN
 
