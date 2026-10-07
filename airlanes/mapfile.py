@@ -12,6 +12,9 @@ from airlanes.world.transport import default_link_capacity
 ZONE_KEYS = frozenset({"zone", "color", "max_drones", "population"})
 CONNECTION_KEYS = frozenset({"max_link_capacity", "distance", "mode"})
 
+# A connection is written `a-b`, and metadata goes in brackets.
+RESERVED_IN_NAMES = "-[]"
+
 
 class ParseError(Exception):
     def __init__(self, line_number: int, message: str) -> None:
@@ -49,7 +52,15 @@ class Parser:
 
                 if not line or line.startswith("#"):
                     continue
+                if not nb_drones and not line.startswith("nb_drones:"):
+                    raise ParseError(
+                        line_num, "nb_drones must be the first declaration."
+                    )
                 if line.startswith("nb_drones:"):
+                    if nb_drones:
+                        raise ParseError(
+                            line_num, "nb_drones already defined."
+                        )
                     nb_drones = self._parse_nb_drones(line, line_num)
                 elif line.startswith("start_hub:"):
                     zone = self._parse_zone(line, line_num, is_start=True)
@@ -132,6 +143,11 @@ class Parser:
         is_end: bool = False,
     ) -> Zone:
         """Parse a zone definition line and return a Zone object."""
+        tokens = line.split()
+        if len(tokens) > 1 and any(c in tokens[1] for c in RESERVED_IN_NAMES):
+            raise ParseError(
+                line_num, "Hub names must not contain '-', '[' or ']'."
+            )
         metadata, line = self._parse_metadata(line, line_num, ZONE_KEYS)
         parts = line.split()
 
@@ -151,6 +167,8 @@ class Parser:
             raise ParseError(
                 line_num, f"Invalid zone type: {zone_type_str}."
             ) from exc
+        if (is_start or is_end) and zone_type is ZoneType.BLOCKED:
+            raise ParseError(line_num, "A start or end hub cannot be blocked.")
 
         color = metadata.get("color")
         explicit_max_drones = "max_drones" in metadata
@@ -201,6 +219,10 @@ class Parser:
             raise ParseError(line_num, "Connection must be zoneA-zoneB.")
 
         zone_a_name, zone_b_name = zone_names
+        if zone_a_name == zone_b_name:
+            raise ParseError(
+                line_num, "A connection must join two different hubs."
+            )
         zone_a = graph.get_zone(zone_a_name)
         zone_b = graph.get_zone(zone_b_name)
 

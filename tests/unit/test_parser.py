@@ -7,6 +7,7 @@ but not valid is never replaced by one.
 """
 
 from collections.abc import Callable
+import math
 from pathlib import Path
 
 import pytest
@@ -800,6 +801,111 @@ def test_numbers_may_have_leading_zeros(write_map: MapWriter) -> None:
     assert (city.max_drones, city.population) == (3, 250000)
     (connection,) = graph.connections
     assert (connection.distance, connection.max_link_capacity) == (900, 1)
+
+
+@pytest.mark.parametrize(
+    ("text", "expected_line", "message"),
+    [
+        pytest.param(
+            "nb_drones: 2\nnb_drones: 3\n",
+            2,
+            "nb_drones already defined.",
+            id="repeated-nb-drones",
+        ),
+        pytest.param(
+            "# comment\nstart_hub: start 0 0\nnb_drones: 2\n",
+            2,
+            "nb_drones must be the first declaration.",
+            id="nb-drones-not-first",
+        ),
+        pytest.param(
+            HEADER + "hub: a-b 1 0\n",
+            4,
+            "Hub names must not contain '-', '[' or ']'.",
+            id="hub-name-with-hyphen",
+        ),
+        pytest.param(
+            "nb_drones: 1\nstart_hub: s-1 0 0\n",
+            2,
+            "Hub names must not contain '-', '[' or ']'.",
+            id="start-name-with-hyphen",
+        ),
+        pytest.param(
+            HEADER + "hub: a[b 1 0\n",
+            4,
+            "Hub names must not contain '-', '[' or ']'.",
+            id="hub-name-with-opening-bracket",
+        ),
+        pytest.param(
+            HEADER + "hub: a]b 1 0\n",
+            4,
+            "Hub names must not contain '-', '[' or ']'.",
+            id="hub-name-with-closing-bracket",
+        ),
+        pytest.param(
+            HEADER + "connection: start-start\n",
+            4,
+            "A connection must join two different hubs.",
+            id="self-loop",
+        ),
+        pytest.param(
+            HEADER + "hub: mid 1 0\nconnection: start-mid\n"
+            "connection: mid-mid\n",
+            6,
+            "A connection must join two different hubs.",
+            id="self-loop-at-a-connected-hub",
+        ),
+        pytest.param(
+            "nb_drones: 1\nstart_hub: start 0 0 [zone=blocked]\n",
+            2,
+            "A start or end hub cannot be blocked.",
+            id="blocked-start",
+        ),
+        pytest.param(
+            "nb_drones: 1\nstart_hub: start 0 0\n"
+            "end_hub: goal 1 0 [zone=blocked]\n",
+            3,
+            "A start or end hub cannot be blocked.",
+            id="blocked-end",
+        ),
+        pytest.param(
+            "nb_drones: 1\nstart_hub: start 0 0 [population=many]\n",
+            2,
+            "population must be positive integer.",
+            id="start-population-invalid",
+        ),
+    ],
+)
+def test_contradictory_declarations_raise_parse_error(
+    write_map: MapWriter, text: str, expected_line: int, message: str
+) -> None:
+    """A self-loop used to be accepted, or reported as a duplicate when
+    the hub already had a lane (BUG-014); a hyphenated hub could be
+    declared but never connected (BUG-015)."""
+    with pytest.raises(ParseError) as excinfo:
+        parse(write_map(text))
+
+    assert excinfo.value.line_number == expected_line
+    assert excinfo.value.message == message
+
+
+def test_terminal_hubs_keep_their_capacity_metadata(
+    write_map: MapWriter,
+) -> None:
+    """Start and end hubs accept and validate `max_drones` and
+    `population`, but their capacity stays unlimited (ADR-015)."""
+    graph, _ = parse(write_map(
+        "nb_drones: 4\n"
+        "start_hub: start 0 0 [population=900000]\n"
+        "end_hub: goal 1 0 [max_drones=1 population=300000]\n"
+    ))
+
+    start, goal = graph.start_zone, graph.end_zone
+    assert start is not None and goal is not None
+    assert (start.max_drones, start.population) == (9, 900000)
+    assert (goal.max_drones, goal.population) == (1, 300000)
+    assert start.effective_capacity() == math.inf
+    assert goal.effective_capacity() == math.inf
 
 
 # --- Errors about the file as a whole ---------------------------------------
