@@ -8,6 +8,10 @@ from airlanes.model.transport_mode import TransportMode
 from airlanes.model.zone import Zone, ZoneType
 from airlanes.world.transport import default_link_capacity
 
+# Metadata keys each kind of declaration accepts.
+ZONE_KEYS = frozenset({"zone", "color", "max_drones", "population"})
+CONNECTION_KEYS = frozenset({"max_link_capacity", "distance", "mode"})
+
 
 class ParseError(Exception):
     def __init__(self, line_number: int, message: str) -> None:
@@ -117,7 +121,7 @@ class Parser:
         is_end: bool = False,
     ) -> Zone:
         """Parse a zone definition line and return a Zone object."""
-        metadata, line = self._parse_metadata(line, line_num)
+        metadata, line = self._parse_metadata(line, line_num, ZONE_KEYS)
         parts = line.split()
 
         if len(parts) != 4:
@@ -174,7 +178,9 @@ class Parser:
         self, line: str, line_num: int, graph: Graph
     ) -> Connection:
         """Parse a connection definition line and return a Connection object"""
-        metadata, line = self._parse_metadata(line, line_num)
+        metadata, line = self._parse_metadata(
+            line, line_num, CONNECTION_KEYS
+        )
         parts = line.split(":", 1)
 
         if len(parts) != 2:
@@ -237,22 +243,39 @@ class Parser:
         return connection
 
     def _parse_metadata(
-        self, line: str, line_num: int
+        self, line: str, line_num: int, keys: frozenset[str]
     ) -> tuple[dict[str, str], str]:
         """
         Extract metadata from a line and return it along
         with the line without metadata.
+
+        A declaration has at most one metadata block, with each of `keys`
+        at most once and never empty. Text after the block is not part of
+        the declaration and is ignored, unless it contains a bracket: that
+        is a second block, or a broken one.
         """
         metadata: dict[str, str] = {}
         match = re.search(r"\[(.*?)\]", line)
 
         if match is None:
+            if "[" in line:
+                raise ParseError(line_num, "Unclosed metadata block.")
             return metadata, line
+
+        tail = line[match.end():]
+        if "[" in tail or "]" in tail:
+            raise ParseError(line_num, "Only one metadata block is allowed.")
 
         for item in match.group(1).split():
             if "=" not in item:
                 raise ParseError(line_num, f"Invalid metadata: {item}.")
             key, value = item.split("=", 1)
+            if key not in keys:
+                raise ParseError(line_num, f"Unknown metadata key: {key}.")
+            if key in metadata:
+                raise ParseError(line_num, f"Repeated metadata key: {key}.")
+            if not value:
+                raise ParseError(line_num, f"Missing value for {key}.")
             metadata[key] = value
 
         line_without_metadata = line[: match.start()].strip()

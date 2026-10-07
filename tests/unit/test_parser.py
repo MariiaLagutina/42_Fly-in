@@ -1,7 +1,9 @@
 """Map parser: accepted format, documented defaults, and line-numbered errors.
 
-Only behavior that the map format promises is tested here. Lenient handling
-of malformed input (unknown keys, ignored values) is deliberately left out.
+Only behavior that the map format promises is tested here: accepted input,
+documented defaults, and an error with its line number for anything the format
+does not allow. Missing optional input takes its default; input that is given
+but not valid is never replaced by one.
 """
 
 from collections.abc import Callable
@@ -527,6 +529,107 @@ def test_line_numbers_count_blank_and_comment_lines(
         parse(write_map(text))
 
     assert excinfo.value.line_number == 8
+
+
+@pytest.mark.parametrize(
+    ("line", "message"),
+    [
+        pytest.param(
+            "hub: mid 1 0 [distanse=5]",
+            "Unknown metadata key: distanse.",
+            id="hub-unknown-key",
+        ),
+        pytest.param(
+            "hub: mid 1 0 [mode=road]",
+            "Unknown metadata key: mode.",
+            id="hub-lane-key",
+        ),
+        pytest.param(
+            "connection: start-goal [mod=road distance=5km]",
+            "Unknown metadata key: mod.",
+            id="lane-unknown-key",
+        ),
+        pytest.param(
+            "connection: start-goal [zone=blocked]",
+            "Unknown metadata key: zone.",
+            id="lane-hub-key",
+        ),
+        pytest.param(
+            "hub: mid 1 0 [zone=blocked zone=normal]",
+            "Repeated metadata key: zone.",
+            id="hub-repeated-key",
+        ),
+        pytest.param(
+            "connection: start-goal [distance=100km distance=900km]",
+            "Repeated metadata key: distance.",
+            id="lane-repeated-key",
+        ),
+        pytest.param(
+            "hub: mid 1 0 [color=]",
+            "Missing value for color.",
+            id="hub-empty-value",
+        ),
+        pytest.param(
+            "connection: start-goal [max_link_capacity=]",
+            "Missing value for max_link_capacity.",
+            id="lane-empty-value",
+        ),
+        pytest.param(
+            "hub: mid 1 0 [zone=normal] [zone=blocked]",
+            "Only one metadata block is allowed.",
+            id="hub-second-block",
+        ),
+        pytest.param(
+            "connection: start-goal [distance=900km] [mode=road]",
+            "Only one metadata block is allowed.",
+            id="lane-second-block",
+        ),
+        pytest.param(
+            "hub: mid 1 0 [zone=normal] max_drones=2]",
+            "Only one metadata block is allowed.",
+            id="closing-bracket-after-block",
+        ),
+        pytest.param(
+            "hub: mid 1 0 [zone=normal] [",
+            "Only one metadata block is allowed.",
+            id="opening-bracket-after-block",
+        ),
+        pytest.param(
+            "hub: mid 1 0 [zone=normal",
+            "Unclosed metadata block.",
+            id="hub-unclosed-block",
+        ),
+        pytest.param(
+            "connection: start-goal [distance=900km",
+            "Unclosed metadata block.",
+            id="lane-unclosed-block",
+        ),
+    ],
+)
+def test_invalid_metadata_raises_parse_error(
+    write_map: MapWriter, line: str, message: str
+) -> None:
+    with pytest.raises(ParseError) as excinfo:
+        parse(write_map(HEADER + line + "\n"))
+
+    assert excinfo.value.line_number == 4
+    assert excinfo.value.message == message
+
+
+def test_text_after_the_metadata_block_is_ignored(
+    write_map: MapWriter,
+) -> None:
+    graph, _ = parse(write_map(
+        HEADER
+        + "hub: mid 1 0 [zone=priority] then some notes\n"
+        + "connection: start-mid [distance=900km] # long haul\n"
+    ))
+
+    mid = graph.get_zone("mid")
+    assert mid is not None
+    assert mid.zone_type is ZoneType.PRIORITY
+    (connection,) = graph.connections
+    assert connection.distance == 900
 
 
 # Superscript digits such as "²" pass `str.isdigit()` but not `int()`, and
