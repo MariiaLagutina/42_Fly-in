@@ -37,6 +37,7 @@ text; the superseding ADR states what it replaces.
 | [ADR-022](#adr-022) | Package structure and layer boundaries | Accepted; partly superseded by [ADR-024](#adr-024) |
 | [ADR-023](#adr-023) | The simulation result keeps every completed turn; the output decides what to print | Accepted; partly superseded by [ADR-024](#adr-024) |
 | [ADR-024](#adr-024) | Turn results are typed outcomes of completed turns | Accepted |
+| [ADR-025](#adr-025) | The map format is strict: missing input takes a default, invalid input is an error | Accepted |
 
 ---
 
@@ -1565,3 +1566,105 @@ happened.
   the command line in every text mode, the text-output snapshot, and the
   Pygame frames are identical, also for `PYTHONHASHSEED` 1 and 2. In every
   completed generated run, the outcomes agree with the events.
+
+---
+
+## ADR-025
+
+### The map format is strict: missing input takes a default, invalid input is an error
+
+- **Status:** Accepted
+- **Date:** 2026-10-07
+
+**Context.** The parser accepted much more than the map format promised,
+and often replaced what the author wrote with a default:
+
+- an unknown metadata key was ignored, so a typo such as `mod=road` left a
+  lane in the air;
+- a repeated key kept its last value, and a second metadata block was
+  ignored, so `[distance=900km] [mode=road]` was an air lane;
+- `population=abc` was ignored, `distance=9km00` was 900 km, and numbers
+  were whatever `int()` accepts, including `٣`, `+1`, and `1_000`;
+- a hyphenated hub name, which the original assignment forbids, could be
+  declared but never connected; a self-loop was accepted or reported as a
+  duplicate depending on the other lanes of its hub;
+- a blocked end hub passed the parser and failed only in the simulation;
+- the file was decoded with the locale's encoding, and invalid UTF-8 ended
+  in a traceback.
+
+The original assignment asks for a clear error, naming the line and the
+cause, for any parsing error.
+
+**Decision.**
+
+- **The principle.** Optional input that is missing takes its documented
+  default. Input that is given but unknown, malformed, repeated, or
+  contradictory is a `ParseError` with its line number, never a default.
+- **The file.** A map is UTF-8, whatever the locale. A byte order mark is
+  accepted at the start of the file only. Lines end with LF, CRLF, or a
+  solitary CR. Invalid UTF-8 is a parse error on the line of the first
+  invalid byte.
+- **Declarations.** `nb_drones` is the first declaration and appears once;
+  comments and blank lines may come before it. Comments are whole lines
+  starting with `#`. There is exactly one start hub and one end hub.
+- **Hub names** cannot contain `-`, which separates the hubs of a
+  connection, or `[` and `]`, which delimit metadata.
+- **Connections** join two different hubs that are already declared, once
+  in either direction.
+- **Metadata.** A declaration has at most one metadata block. Hubs accept
+  `zone`, `color`, `max_drones`, and `population`; lanes accept
+  `max_link_capacity`, `distance`, and `mode`. Each key appears at most
+  once and has a value. Text after the block is not part of the
+  declaration and is ignored, but a bracket there is a second or broken
+  block, and an error, as is a block that is never closed.
+- **Numbers** are ASCII digits. Positive fields (`nb_drones`, `max_drones`,
+  `max_link_capacity`, `population`) are `[0-9]+` and greater than zero;
+  coordinates are `-?[0-9]+`. Leading zeros are allowed. A distance is a
+  positive number followed by `km`, for both modes; a lane without a
+  distance omits it.
+- **Start and end hubs** cannot be blocked. They accept and validate
+  `max_drones` and `population` like any hub, and the hub keeps the
+  values, but their capacity is unlimited ([ADR-015](#adr-015)): neither
+  an explicit capacity nor one derived from the population constrains
+  them.
+- **Not changed by this decision:** `nb_drones:3` without a space is
+  accepted, errors about the file as a whole report line 0, `zone` and
+  `mode` values are case-sensitive, and `color` is any non-empty word.
+
+**Rationale.**
+
+- A default that replaces a mistake changes the simulation without telling
+  the author. An error with a line number costs one edit.
+- Text after the block leaves room for notes, but a bracket there is almost
+  certainly metadata the author expects to apply.
+- One integer syntax keeps the format readable as written. `int()` accepts
+  digits and separators that a map author cannot easily see or check.
+- A hyphen in a hub name makes the connection syntax ambiguous, and the
+  assignment forbids it. Brackets in a name made the metadata block
+  ambiguous.
+- A self-loop has no meaning: an aircraft waits in place without a lane
+  ([ADR-014](#adr-014)).
+- A blocked end hub makes every route impossible, so the map is unusable;
+  a blocked start contradicts "inaccessible". Both are now reported where
+  they are written.
+- Eleven of the twelve bundled maps and the README example set
+  `max_drones` on the start and end hubs, always to the number of
+  aircraft. Rejecting it would break them for no gain.
+- Zero kilometres is not a way to write "no distance": omission already
+  is, and the README documented a positive distance.
+- The same file must parse the same way on every machine. Editors on some
+  systems add a byte order mark.
+
+**Consequences.**
+
+- [BUG-013](bug-triage.md#bug-013), [BUG-014](bug-triage.md#bug-014), and
+  [BUG-015](bug-triage.md#bug-015) are fixed.
+- [BUG-007](bug-triage.md#bug-007) fixed a crash and deliberately kept
+  every digit accepted before it, including other Unicode decimal digits.
+  This decision narrows the grammar to ASCII digits.
+- `Graph.get_connection(a, a)` still returns any lane at `a`; the parser no
+  longer creates a self-loop that would reach it.
+- Maps that relied on the lenient parser now stop with a parse error. All
+  twelve bundled maps parse to the same model as before, and the
+  simulation, the command line in every text mode, and the text-output
+  snapshot are unchanged.

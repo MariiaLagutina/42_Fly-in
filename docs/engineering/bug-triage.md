@@ -75,6 +75,9 @@ the code into the `airlanes/` package:
 | [BUG-010](#bug-010) | The standard Pygame viewer calls a later turn without movement the initial state | `VERIFIED` | Low | Pygame output |
 | [BUG-011](#bug-011) | The dispatch board infers flight delays from the current weather | `VERIFIED` | Low | Pygame output |
 | [BUG-012](#bug-012) | Arrivals by road are described as landings | `VERIFIED` | Low | Pygame and command-line output |
+| [BUG-013](#bug-013) | A map that is not valid UTF-8 ends in a traceback | `VERIFIED` | Medium | Map parser |
+| [BUG-014](#bug-014) | A self-loop is accepted or reported as a duplicate, depending on the other lanes | `VERIFIED` | Low | Map parser |
+| [BUG-015](#bug-015) | A hyphenated hub name is accepted but cannot be connected | `VERIFIED` | Low | Map parser |
 
 ---
 
@@ -552,8 +555,8 @@ error, and the entry points ignored it.
 | Affected area | `airlanes/mapfile.py`: numeric fields; `airlanes/cli.py`: `main` |
 | Discovered during | Map-parser audit (PR #3), 2026-10-03; registered during the Bugs & Cleanup audit, 2026-10-06 |
 | Resolution | Fixed in PR #16 |
-| Regression tests | `test_non_decimal_digits_raise_parse_error` and `test_non_decimal_population_does_not_crash` in `tests/unit/test_parser.py`; `test_a_directory_is_reported_as_an_unreadable_map` in `tests/integration/test_cli_errors.py`. They fail before the fix. |
-| Verification | Full suite passes. Every numeric value accepted before, including other Unicode decimal digits such as `５`, is still accepted. |
+| Regression tests | `test_non_decimal_digits_raise_parse_error` and `test_non_decimal_population_does_not_crash` in `tests/unit/test_parser.py`; `test_a_directory_is_reported_as_an_unreadable_map` in `tests/integration/test_cli_errors.py`. They fail before the fix. [ADR-025](decisions.md#adr-025) later replaced the population test with the strict `test_invalid_population_raises_parse_error`. |
+| Verification | Full suite passes. At the time of PR #16, every numeric value accepted before, including other Unicode decimal digits such as `５`, remained accepted. [ADR-025](decisions.md#adr-025) later narrowed the map grammar to ASCII digits. |
 | Related PR | PR #16 |
 
 **Violated expected behavior.** A map that cannot be used stops the program
@@ -953,6 +956,132 @@ The sprite drawn for an aircraft at a hub is unchanged.
   modes are byte-identical.
 - Text-output snapshot (1,572 runs, with weather): only the flight log
   differs, in 10,300 lines, again only in that suffix.
+
+---
+
+## BUG-013
+
+### A map that is not valid UTF-8 ends in a traceback
+
+| Field | Value |
+| --- | --- |
+| Status | `VERIFIED` |
+| Severity | Medium |
+| Affected area | `airlanes/mapfile.py`: `Parser.parse` |
+| Discovered during | Bugs & Cleanup audit, 2026-10-06 (left out of [BUG-007](#bug-007)); measured in the parser policy audit, 2026-10-07 |
+| Resolution | Fixed with the map parsing policy ([ADR-025](decisions.md#adr-025)): the map is decoded as UTF-8, and invalid bytes are a parse error |
+| Regression test | `test_invalid_utf8_raises_parse_error_with_its_line_number` in `tests/unit/test_parser.py`; `test_a_map_that_is_not_utf8_exits_with_a_parse_error` in `tests/integration/test_cli_errors.py`. Both fail before the fix. |
+| Verification | Full suite passes, including the line-ending tests for LF, CRLF, solitary CR, and mixed endings. Bundled maps parse to the same model. |
+
+**Violated expected behavior.** A map that cannot be used stops the program
+with a clear error naming the line and the cause, not a crash.
+
+**Observed behavior.** The map file was opened in text mode with the
+locale's encoding. A byte that is not valid UTF-8 raised
+`UnicodeDecodeError` out of the parser, and the command line printed a
+traceback. The same file could also decode differently under another
+locale.
+
+**Reproducer.** A map with the byte `0xE9` in a hub name, as a Latin-1
+editor writes `café`:
+
+```sh
+printf 'nb_drones: 1\nstart_hub: caf\xe9 0 0\n' > repro.txt
+```
+
+**Root cause (confirmed).** `open(filepath, "r")` without an encoding, and
+no handling of decoding errors.
+
+**Fix.** The file is read as bytes and decoded as UTF-8. A byte order mark
+is removed at the start of the file only. Invalid UTF-8 is a `ParseError`
+on the line of the first invalid byte. Lines are split as in text mode, so
+LF, CRLF, and a solitary CR keep their line numbers.
+
+---
+
+## BUG-014
+
+### A self-loop is accepted or reported as a duplicate, depending on the other lanes
+
+| Field | Value |
+| --- | --- |
+| Status | `VERIFIED` |
+| Severity | Low |
+| Affected area | `airlanes/mapfile.py`: `Parser._parse_connection`; `airlanes/model/graph.py`: `Graph.get_connection` |
+| Discovered during | Bugs & Cleanup audit, 2026-10-06 (left out of [BUG-007](#bug-007)); measured in the parser policy audit, 2026-10-07 |
+| Resolution | Fixed with the map parsing policy ([ADR-025](decisions.md#adr-025)): a connection must join two different hubs |
+| Regression test | `test_contradictory_declarations_raise_parse_error` (`self-loop`, `self-loop-at-a-connected-hub`) in `tests/unit/test_parser.py`. Both fail before the fix. |
+| Verification | Full suite passes. Bundled maps parse to the same model. |
+
+**Violated expected behavior.** A map line gets one answer, whatever the
+lines around it.
+
+**Observed behavior.** `connection: a-a` was accepted when it was the first
+lane at `a`, and gave a lane that no route used. After another lane at
+`a`, the same line failed with `Duplicate connection: a-a.`
+
+**Reproducer.**
+
+```txt
+nb_drones: 1
+start_hub: start 0 0
+hub: a 1 0
+end_hub: goal 2 0
+connection: start-a
+connection: a-a
+connection: a-goal
+```
+
+Line 6 failed as a duplicate; moving it before line 5 made the map valid.
+
+**Root cause (confirmed).** The duplicate check calls
+`Graph.get_connection(a, a)`, which returns any lane that touches `a`.
+
+**Fix.** The parser rejects a connection whose two hubs are the same,
+before the duplicate check: `A connection must join two different hubs.`
+`Graph.get_connection` is unchanged; no parsed map reaches it with the same
+hub twice.
+
+---
+
+## BUG-015
+
+### A hyphenated hub name is accepted but cannot be connected
+
+| Field | Value |
+| --- | --- |
+| Status | `VERIFIED` |
+| Severity | Low |
+| Affected area | `airlanes/mapfile.py`: `Parser._parse_zone` |
+| Discovered during | Bugs & Cleanup audit, 2026-10-06 (left out of [BUG-007](#bug-007)); measured in the parser policy audit, 2026-10-07 |
+| Resolution | Fixed with the map parsing policy ([ADR-025](decisions.md#adr-025)): hub names cannot contain `-`, `[`, or `]` |
+| Regression test | `test_contradictory_declarations_raise_parse_error` (`hub-name-with-hyphen`, `start-name-with-hyphen`, and the bracket cases) in `tests/unit/test_parser.py`. They fail before the fix. |
+| Verification | Full suite passes. Bundled maps parse to the same model; none uses these characters. |
+
+**Violated expected behavior.** The original assignment forbids dashes in
+hub names, because the connection syntax uses them.
+
+**Observed behavior.** `hub: a-b 1 0` was accepted. Every connection to it
+then failed with `Connection must be zoneA-zoneB.`, a message about the
+connection line rather than the name. A hyphenated start or end hub could
+not be connected at all.
+
+**Reproducer.**
+
+```txt
+nb_drones: 1
+start_hub: start 0 0
+end_hub: goal 2 0
+hub: a-b 1 0
+connection: start-a-b
+```
+
+**Root cause (confirmed).** Hub names were not checked; the connection
+syntax splits on `-`.
+
+**Fix.** A hub name containing `-`, `[`, or `]` is a parse error on the
+line that declares it. The brackets are reserved because they delimit
+metadata.
 
 ---
 

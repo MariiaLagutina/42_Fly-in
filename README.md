@@ -268,12 +268,31 @@ Lane metadata:
 - `distance=<positive integer>km`
 - `mode=air|road` (default `air`; `road` requires a `distance`)
 
-The parser reports malformed lines, duplicate hubs and lanes, invalid
-capacities and distances, unknown hub types and transport modes, road lanes
-without a distance, and missing start or end hubs as a `ParseError`
-with the line number. If no route connects the start and end hubs, the
-simulator stops with an explicit error, and so it does when aircraft block
-each other with no way around (`DeadlockError`).
+The format is strict ([ADR-025](docs/engineering/decisions.md#adr-025)):
+missing optional metadata takes its default, but anything given and not
+valid is an error, never a default.
+
+- The file is UTF-8. `nb_drones` is the first declaration and appears
+  once; comments (`#` lines) and blank lines may come before it.
+- Hub names cannot contain `-`, `[`, or `]`. The start and end hubs cannot
+  be blocked; they accept `max_drones` and `population`, but their
+  capacity is unlimited.
+- A lane joins two different hubs declared earlier, once in either
+  direction. A lane without a `distance` is abstract; a distance is never
+  `0km`.
+- A line has at most one metadata block, with keys of its own kind, each
+  once and with a value. Text after the block is ignored, unless it
+  contains a bracket.
+- Numbers are ASCII digits; coordinates may be negative.
+
+The parser reports anything outside this format, such as malformed lines,
+unknown or repeated metadata, invalid values, duplicate hubs and lanes,
+road lanes without a distance, or missing start or end hubs, as a
+`ParseError` with the line number.
+
+If no route connects the start and end hubs, the simulator stops with an
+explicit error, and so it does when aircraft block each other with no way
+around (`DeadlockError`).
 
 ### Included maps
 
