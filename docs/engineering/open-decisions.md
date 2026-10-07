@@ -188,8 +188,10 @@ Details are in [dynamic-routing.md](dynamic-routing.md#evidence).
 ### How are turns without movement represented in the output?
 
 - **Status:** `OPEN`
-- **To be decided in:** the Output & event audit step, together
-  with how waiting, reroutes, and diversions are shown.
+- **To be decided in:** not scheduled. The Output & event audit
+  ([ADR-023](decisions.md#adr-023)) moved the movement filter into the
+  output but left this question open: how the assignment-style text output
+  shows turns without movement, waiting, and transit.
 
 **Context.** The output format of the original assignment prints one line per
 turn and omits aircraft that do not move. On long distance-based legs a turn
