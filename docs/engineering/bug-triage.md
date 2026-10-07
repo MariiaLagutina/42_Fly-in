@@ -957,43 +957,56 @@ The sprite drawn for an aircraft at a hub is unchanged.
 
 ## Technical debt
 
-These are not runtime bugs: the code below is never executed by the
-simulation. It is recorded so it can be removed or used deliberately later.
+These are not runtime bugs: the code they describe was never executed by
+the simulation. It is recorded so it can be removed or used deliberately
+later.
 
 ### TD-001 — Unused pathfinding and simulation code
 
 | Field | Value |
 | --- | --- |
-| Status | `CONFIRMED` |
+| Status | `VERIFIED` |
 | Discovered during | Pathfinding and simulation test audit (PR #4), 2026-10-03 |
+| Resolution | Removed in the Stage 3 dead-code cleanup, 2026-10-07 |
+| Regression test | Not applicable: the code is removed. `mypy --strict` and `flake8` fail on any remaining reference. |
+| Verification | Full suite passes. Simulation results on the bundled maps, command-line output, and the text-output snapshot are unchanged. |
+
+The code below was never called by the simulation and has been removed:
 
 - `Pathfinder.find_path_dijkstra`, `Pathfinder.find_multiple_paths`,
-  `Pathfinder._pathfinding_cost`, and `Pathfinder.heuristic` are not called by
-  the simulation. The route planner is `find_cooperative_path`, and
-  `find_route` handles reroutes and the reachability check. Since PR #9,
-  `find_path_bfs` is not called either: the reachability check has to
-  respect the consecutive-road budget, which it does not.
-- `Simulator._path_cost` and `Simulator.print_stats` are not called.
-  `Simulator.print_results` was removed with `SimulationTurn`
+  `Pathfinder._pathfinding_cost`, and `Pathfinder.heuristic`. The route
+  planner is `find_cooperative_path`, and `find_route` handles reroutes and
+  the reachability check. `find_path_bfs` was the reachability check until
+  PR #9, which replaced it with `find_route`: the check has to respect the
+  consecutive-road budget, which BFS does not.
+- `Simulator._path_cost` and `Simulator.print_stats`, which had no callers.
+  `Simulator.print_results` was removed earlier with `SimulationTurn`
   ([ADR-024](decisions.md#adr-024)).
 - `SimulationConfig.UNREACHABLE_COST`, `RESERVATION_PENALTY_WEIGHT`, and
-  `PRIORITY_ZONE_BASE_COST` are used only by the unused methods above.
+  `PRIORITY_ZONE_BASE_COST`, which only the removed methods used.
 - Resolved in PR #8: the storm/snow road penalty (`WEATHER_PENALTY_SEVERE`)
   used to be unreachable, because storm and snow closed every lane. Roads now
   stay open in storm and snow ([ADR-016](decisions.md#adr-016)), so the
   penalty applies.
 
-These methods are intentionally not covered by tests.
-
 ### TD-002 — Unused model state
 
 | Field | Value |
 | --- | --- |
-| Status | `CONFIRMED` |
+| Status | `VERIFIED` |
 | Discovered during | Core unit test audit (PR #3), 2026-10-03 |
+| Resolution | Removed in the Stage 3 dead-code cleanup, 2026-10-07 |
+| Regression test | Not applicable: the state is removed. `mypy --strict` and `flake8` fail on any remaining reference. |
+| Verification | As for [TD-001](#td-001--unused-pathfinding-and-simulation-code). |
 
-- `Connection.current_drones` is never updated, so `Connection.has_capacity()`
-  always reflects zero usage. Link capacity is enforced by the simulator.
-- `Zone.reservations` is always 0. Only the unused
-  `Pathfinder._pathfinding_cost` reads it.
-- `DroneState.MOVING` is never assigned.
+The state below was never used by the simulation and has been removed:
+
+- `Connection.current_drones` was never updated, so
+  `Connection.has_capacity()` always reflected zero usage. Lane capacity is
+  enforced by the planner's reservation tables and the simulator's lane
+  usage count ([ADR-019](decisions.md#adr-019)).
+- `Zone.reservations` was always 0. Only `Pathfinder._pathfinding_cost`
+  ([TD-001](#td-001--unused-pathfinding-and-simulation-code)) read it. It is
+  unrelated to the planner's reservation tables, which are unchanged.
+- `DroneState.MOVING` was never assigned. The runtime states are `WAITING`,
+  `IN_TRANSIT`, and `DELIVERED`.
