@@ -84,6 +84,22 @@ def test_an_invalid_map_exits_with_an_error(
     )
 
 
+def test_a_map_that_is_not_utf8_exits_with_a_parse_error(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    """Invalid UTF-8 used to end in a `UnicodeDecodeError` traceback
+    (BUG-013)."""
+    map_file = tmp_path / "map.txt"
+    map_file.write_bytes(b"nb_drones: 1\nstart_hub: caf\xe9 0 0\n")
+
+    assert run_main(monkeypatch, str(map_file)) == EXIT_ERROR
+    assert capsys.readouterr().err == (
+        "Error parsing input file: Line 2: Map file is not valid UTF-8.\n"
+    )
+
+
 def test_a_failed_simulation_exits_with_an_error(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],

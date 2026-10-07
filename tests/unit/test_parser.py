@@ -1,10 +1,13 @@
 """Map parser: accepted format, documented defaults, and line-numbered errors.
 
-Only behavior that the map format promises is tested here. Lenient handling
-of malformed input (unknown keys, ignored values) is deliberately left out.
+Only behavior that the map format promises is tested here: accepted input,
+documented defaults, and an error with its line number for anything the format
+does not allow. Missing optional input takes its default; input that is given
+but not valid is never replaced by one.
 """
 
 from collections.abc import Callable
+import math
 from pathlib import Path
 
 import pytest
@@ -95,6 +98,75 @@ def test_blank_lines_comments_indentation_and_crlf_are_accepted(
     assert nb_drones == 3
     assert graph.start_zone is not None
     assert graph.end_zone is not None
+
+
+@pytest.mark.parametrize(
+    "newline", ["\n", "\r\n", "\r"], ids=["lf", "crlf", "cr"]
+)
+def test_every_line_ending_separates_lines(
+    write_map: MapWriter, newline: str
+) -> None:
+    lines = ["# comment", "", "nb_drones: 2", "start_hub: start 0 0",
+             "end_hub: goal 1 0", "hub: broken"]
+
+    with pytest.raises(ParseError) as excinfo:
+        parse(write_map(newline.join(lines) + newline))
+
+    assert excinfo.value.line_number == 6
+
+
+def test_mixed_line_endings_keep_line_numbers(write_map: MapWriter) -> None:
+    text = (
+        "nb_drones: 2\r"
+        "start_hub: start 0 0\r\n"
+        "end_hub: goal 1 0\n"
+        "\r"
+        "hub: broken\n"
+    )
+
+    with pytest.raises(ParseError) as excinfo:
+        parse(write_map(text))
+
+    assert excinfo.value.line_number == 5
+
+
+def test_a_byte_order_mark_at_the_start_is_accepted(
+    write_map: MapWriter,
+) -> None:
+    graph, nb_drones = parse(write_map("﻿" + HEADER))
+
+    assert nb_drones == 2
+    assert graph.start_zone is not None
+
+
+def test_a_byte_order_mark_elsewhere_is_rejected(
+    write_map: MapWriter,
+) -> None:
+    with pytest.raises(ParseError) as excinfo:
+        parse(write_map(HEADER + "﻿hub: mid 1 0\n"))
+
+    assert excinfo.value.line_number == 4
+
+
+@pytest.mark.parametrize(
+    ("before", "expected_line"),
+    [
+        pytest.param(b"", 4, id="line-start"),
+        pytest.param(b"hub: caf", 4, id="mid-line"),
+        pytest.param(b"\r", 5, id="after-solitary-cr"),
+    ],
+)
+def test_invalid_utf8_raises_parse_error_with_its_line_number(
+    tmp_path: Path, before: bytes, expected_line: int
+) -> None:
+    path = tmp_path / "map.txt"
+    path.write_bytes(HEADER.encode() + before + b"\xe9 1 0\n")
+
+    with pytest.raises(ParseError) as excinfo:
+        parse(path)
+
+    assert excinfo.value.line_number == expected_line
+    assert excinfo.value.message == "Map file is not valid UTF-8."
 
 
 def test_negative_coordinates_are_accepted(write_map: MapWriter) -> None:
@@ -460,6 +532,107 @@ def test_line_numbers_count_blank_and_comment_lines(
     assert excinfo.value.line_number == 8
 
 
+@pytest.mark.parametrize(
+    ("line", "message"),
+    [
+        pytest.param(
+            "hub: mid 1 0 [distanse=5]",
+            "Unknown metadata key: distanse.",
+            id="hub-unknown-key",
+        ),
+        pytest.param(
+            "hub: mid 1 0 [mode=road]",
+            "Unknown metadata key: mode.",
+            id="hub-lane-key",
+        ),
+        pytest.param(
+            "connection: start-goal [mod=road distance=5km]",
+            "Unknown metadata key: mod.",
+            id="lane-unknown-key",
+        ),
+        pytest.param(
+            "connection: start-goal [zone=blocked]",
+            "Unknown metadata key: zone.",
+            id="lane-hub-key",
+        ),
+        pytest.param(
+            "hub: mid 1 0 [zone=blocked zone=normal]",
+            "Repeated metadata key: zone.",
+            id="hub-repeated-key",
+        ),
+        pytest.param(
+            "connection: start-goal [distance=100km distance=900km]",
+            "Repeated metadata key: distance.",
+            id="lane-repeated-key",
+        ),
+        pytest.param(
+            "hub: mid 1 0 [color=]",
+            "Missing value for color.",
+            id="hub-empty-value",
+        ),
+        pytest.param(
+            "connection: start-goal [max_link_capacity=]",
+            "Missing value for max_link_capacity.",
+            id="lane-empty-value",
+        ),
+        pytest.param(
+            "hub: mid 1 0 [zone=normal] [zone=blocked]",
+            "Only one metadata block is allowed.",
+            id="hub-second-block",
+        ),
+        pytest.param(
+            "connection: start-goal [distance=900km] [mode=road]",
+            "Only one metadata block is allowed.",
+            id="lane-second-block",
+        ),
+        pytest.param(
+            "hub: mid 1 0 [zone=normal] max_drones=2]",
+            "Only one metadata block is allowed.",
+            id="closing-bracket-after-block",
+        ),
+        pytest.param(
+            "hub: mid 1 0 [zone=normal] [",
+            "Only one metadata block is allowed.",
+            id="opening-bracket-after-block",
+        ),
+        pytest.param(
+            "hub: mid 1 0 [zone=normal",
+            "Unclosed metadata block.",
+            id="hub-unclosed-block",
+        ),
+        pytest.param(
+            "connection: start-goal [distance=900km",
+            "Unclosed metadata block.",
+            id="lane-unclosed-block",
+        ),
+    ],
+)
+def test_invalid_metadata_raises_parse_error(
+    write_map: MapWriter, line: str, message: str
+) -> None:
+    with pytest.raises(ParseError) as excinfo:
+        parse(write_map(HEADER + line + "\n"))
+
+    assert excinfo.value.line_number == 4
+    assert excinfo.value.message == message
+
+
+def test_text_after_the_metadata_block_is_ignored(
+    write_map: MapWriter,
+) -> None:
+    graph, _ = parse(write_map(
+        HEADER
+        + "hub: mid 1 0 [zone=priority] then some notes\n"
+        + "connection: start-mid [distance=900km] # long haul\n"
+    ))
+
+    mid = graph.get_zone("mid")
+    assert mid is not None
+    assert mid.zone_type is ZoneType.PRIORITY
+    (connection,) = graph.connections
+    assert connection.distance == 900
+
+
 # Superscript digits such as "²" pass `str.isdigit()` but not `int()`, and
 # used to escape as a ValueError traceback (BUG-007).
 @pytest.mark.parametrize(
@@ -501,13 +674,238 @@ def test_non_decimal_digits_raise_parse_error(
     assert excinfo.value.message == message
 
 
-def test_non_decimal_population_does_not_crash(write_map: MapWriter) -> None:
-    """Only the absence of a crash is asserted: how an invalid population
-    is handled is not part of the map format yet."""
-    try:
-        parse(write_map(HEADER + "hub: a 1 0 [population=²]\n"))
-    except ParseError:
-        pass
+@pytest.mark.parametrize(
+    "population",
+    ["abc", "²", "0", "-5", "1.5", "٣٠٠٠٠٠"],
+    ids=["text", "superscript", "zero", "negative", "decimal", "arabic"],
+)
+def test_invalid_population_raises_parse_error(
+    write_map: MapWriter, population: str
+) -> None:
+    """An invalid population used to be ignored, leaving the hub at the
+    default capacity."""
+    with pytest.raises(ParseError) as excinfo:
+        parse(write_map(HEADER + f"hub: a 1 0 [population={population}]\n"))
+
+    assert excinfo.value.line_number == 4
+    assert excinfo.value.message == "population must be positive integer."
+
+
+# Numbers are ASCII digits only. Other Unicode decimal digits, such as the
+# Arabic-Indic "٣", used to be accepted.
+@pytest.mark.parametrize(
+    ("text", "expected_line", "message"),
+    [
+        pytest.param(
+            "nb_drones: ٣\n",
+            1,
+            "nb_drones must be positive integer.",
+            id="nb-drones",
+        ),
+        pytest.param(
+            HEADER + "hub: a 1 0 [max_drones=٣]\n",
+            4,
+            "max_drones must be positive integer.",
+            id="max-drones",
+        ),
+        pytest.param(
+            HEADER + "connection: start-goal [max_link_capacity=٣]\n",
+            4,
+            "max_link_capacity must be positive integer.",
+            id="link-capacity",
+        ),
+        pytest.param(
+            HEADER + "connection: start-goal [distance=٣٠٠km]\n",
+            4,
+            "distance must be a whole number of km.",
+            id="distance",
+        ),
+        pytest.param(
+            HEADER + "hub: a ٣ 0\n",
+            4,
+            "Zone coordinates must be integers.",
+            id="coordinate",
+        ),
+        pytest.param(
+            HEADER + "hub: a +1 0\n",
+            4,
+            "Zone coordinates must be integers.",
+            id="coordinate-plus-sign",
+        ),
+        pytest.param(
+            HEADER + "hub: a 1_000 0\n",
+            4,
+            "Zone coordinates must be integers.",
+            id="coordinate-underscore",
+        ),
+    ],
+)
+def test_non_ascii_numbers_raise_parse_error(
+    write_map: MapWriter, text: str, expected_line: int, message: str
+) -> None:
+    with pytest.raises(ParseError) as excinfo:
+        parse(write_map(text))
+
+    assert excinfo.value.line_number == expected_line
+    assert excinfo.value.message == message
+
+
+@pytest.mark.parametrize(
+    "distance",
+    ["9km00", "km100", "100kmkm", "100", "100 km"],
+    ids=["km-inside", "km-first", "km-twice", "no-unit", "space"],
+)
+def test_distance_is_a_number_followed_by_km(
+    write_map: MapWriter, distance: str
+) -> None:
+    """`km` used to be removed wherever it appeared, so `9km00` was 900 km,
+    and a number without a unit was accepted."""
+    with pytest.raises(ParseError) as excinfo:
+        parse(write_map(
+            HEADER + f"connection: start-goal [distance={distance}]\n"
+        ))
+
+    assert excinfo.value.line_number == 4
+
+
+@pytest.mark.parametrize("mode", ["air", "road"])
+def test_zero_distance_raises_parse_error(
+    write_map: MapWriter, mode: str
+) -> None:
+    """A lane without a distance omits it; zero is not a distance."""
+    with pytest.raises(ParseError) as excinfo:
+        parse(write_map(
+            HEADER + f"connection: start-goal [distance=0km mode={mode}]\n"
+        ))
+
+    assert excinfo.value.line_number == 4
+    assert excinfo.value.message == (
+        "distance must be positive; a lane without a distance omits it."
+    )
+
+
+def test_numbers_may_have_leading_zeros(write_map: MapWriter) -> None:
+    graph, nb_drones = parse(write_map(
+        "nb_drones: 02\n"
+        "start_hub: start 00 -07\n"
+        "end_hub: goal 3 0\n"
+        "hub: city 1 0 [max_drones=03 population=0250000]\n"
+        "connection: start-goal [distance=0900km max_link_capacity=01]\n"
+    ))
+
+    assert nb_drones == 2
+    assert graph.start_zone is not None
+    assert (graph.start_zone.x, graph.start_zone.y) == (0, -7)
+    city = graph.get_zone("city")
+    assert city is not None
+    assert (city.max_drones, city.population) == (3, 250000)
+    (connection,) = graph.connections
+    assert (connection.distance, connection.max_link_capacity) == (900, 1)
+
+
+@pytest.mark.parametrize(
+    ("text", "expected_line", "message"),
+    [
+        pytest.param(
+            "nb_drones: 2\nnb_drones: 3\n",
+            2,
+            "nb_drones already defined.",
+            id="repeated-nb-drones",
+        ),
+        pytest.param(
+            "# comment\nstart_hub: start 0 0\nnb_drones: 2\n",
+            2,
+            "nb_drones must be the first declaration.",
+            id="nb-drones-not-first",
+        ),
+        pytest.param(
+            HEADER + "hub: a-b 1 0\n",
+            4,
+            "Hub names must not contain '-', '[' or ']'.",
+            id="hub-name-with-hyphen",
+        ),
+        pytest.param(
+            "nb_drones: 1\nstart_hub: s-1 0 0\n",
+            2,
+            "Hub names must not contain '-', '[' or ']'.",
+            id="start-name-with-hyphen",
+        ),
+        pytest.param(
+            HEADER + "hub: a[b 1 0\n",
+            4,
+            "Hub names must not contain '-', '[' or ']'.",
+            id="hub-name-with-opening-bracket",
+        ),
+        pytest.param(
+            HEADER + "hub: a]b 1 0\n",
+            4,
+            "Hub names must not contain '-', '[' or ']'.",
+            id="hub-name-with-closing-bracket",
+        ),
+        pytest.param(
+            HEADER + "connection: start-start\n",
+            4,
+            "A connection must join two different hubs.",
+            id="self-loop",
+        ),
+        pytest.param(
+            HEADER + "hub: mid 1 0\nconnection: start-mid\n"
+            "connection: mid-mid\n",
+            6,
+            "A connection must join two different hubs.",
+            id="self-loop-at-a-connected-hub",
+        ),
+        pytest.param(
+            "nb_drones: 1\nstart_hub: start 0 0 [zone=blocked]\n",
+            2,
+            "A start or end hub cannot be blocked.",
+            id="blocked-start",
+        ),
+        pytest.param(
+            "nb_drones: 1\nstart_hub: start 0 0\n"
+            "end_hub: goal 1 0 [zone=blocked]\n",
+            3,
+            "A start or end hub cannot be blocked.",
+            id="blocked-end",
+        ),
+        pytest.param(
+            "nb_drones: 1\nstart_hub: start 0 0 [population=many]\n",
+            2,
+            "population must be positive integer.",
+            id="start-population-invalid",
+        ),
+    ],
+)
+def test_contradictory_declarations_raise_parse_error(
+    write_map: MapWriter, text: str, expected_line: int, message: str
+) -> None:
+    """A self-loop used to be accepted, or reported as a duplicate when
+    the hub already had a lane (BUG-014); a hyphenated hub could be
+    declared but never connected (BUG-015)."""
+    with pytest.raises(ParseError) as excinfo:
+        parse(write_map(text))
+
+    assert excinfo.value.line_number == expected_line
+    assert excinfo.value.message == message
+
+
+def test_terminal_hubs_keep_their_capacity_metadata(
+    write_map: MapWriter,
+) -> None:
+    """Start and end hubs accept and validate `max_drones` and
+    `population`, but their capacity stays unlimited (ADR-015)."""
+    graph, _ = parse(write_map(
+        "nb_drones: 4\n"
+        "start_hub: start 0 0 [population=900000]\n"
+        "end_hub: goal 1 0 [max_drones=1 population=300000]\n"
+    ))
+
+    start, goal = graph.start_zone, graph.end_zone
+    assert start is not None and goal is not None
+    assert (start.max_drones, start.population) == (9, 900000)
+    assert (goal.max_drones, goal.population) == (1, 300000)
+    assert start.effective_capacity() == math.inf
+    assert goal.effective_capacity() == math.inf
 
 
 # --- Errors about the file as a whole ---------------------------------------
