@@ -112,8 +112,10 @@ but not optimized as a target, and no coverage threshold is enforced yet.
 ### Tests isolate and restore global random state
 
 - **Status:** Superseded by [ADR-012](#adr-012). Since PR #8, weather comes
-  from providers that own their random generator, and no production code
-  uses the global `random` module.
+  from providers that own their random generator, and the simulation no
+  longer uses the global `random` module. The only production use left is
+  decorative: the dispatch viewer draws its flight numbers from it, which
+  does not affect the simulation.
 - **Date:** 2026-10-03
 
 **Context.** The weather system draws from the global `random` module, even

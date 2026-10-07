@@ -1,4 +1,5 @@
-"""Dispatch board of the airlines Pygame viewer: flight statuses (BUG-011).
+"""Dispatch board of the airlines Pygame viewer: flight statuses (BUG-011,
+BUG-012).
 
 Runs headless with SDL's dummy video driver and records the badges the
 live-departures panel renders after each replayed turn.
@@ -103,4 +104,33 @@ def test_weather_reroute_marks_the_first_leg_of_the_new_route(
         ScriptedWeather({1: {"start-goal": WeatherCondition.STORM}}),
     )
 
-    assert statuses == [["WEATHER REROUTE"], ["LANDED"], ["DRIVING"], []]
+    assert statuses == [["WEATHER REROUTE"], ["ARRIVED"], ["DRIVING"], []]
+
+
+@pytest.mark.parametrize(
+    ("first_leg", "statuses"),
+    [
+        pytest.param(
+            Link("start", "a", distance=800),
+            [["EN ROUTE"], ["LANDED"], ["EN ROUTE"], []],
+            id="air-then-air",
+        ),
+        pytest.param(
+            Link("start", "a", distance=150, mode=TransportMode.ROAD),
+            [["DRIVING"], ["ARRIVED"], ["EN ROUTE"], []],
+            id="road-then-air",
+        ),
+    ],
+)
+def test_an_aircraft_at_a_hub_is_described_by_the_leg_it_completed(
+    monkeypatch: pytest.MonkeyPatch,
+    first_leg: Link,
+    statuses: list[list[str]],
+) -> None:
+    """Each leg takes 2 turns; the second one is an 800 km air leg. On turn
+    2 the aircraft waits at `a` after the first leg (BUG-012)."""
+    assert board_statuses(
+        monkeypatch,
+        [first_leg, Link("a", "goal", distance=800)],
+        ScriptedWeather({}),
+    ) == statuses

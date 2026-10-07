@@ -7,7 +7,12 @@ nothing for reroutes.
 
 import pytest
 
-from airlanes.events import AgentInTransit, TurnFinished, TurnStarted
+from airlanes.events import (
+    AgentInTransit,
+    AgentMoved,
+    TurnFinished,
+    TurnStarted,
+)
 from airlanes.output.text import (
     AirlinesVisualizer,
     Visualizer,
@@ -114,4 +119,27 @@ def test_flight_log_shows_a_multi_turn_departure_as_in_transit() -> None:
     assert log.render() == [
         "Turn 1",
         "  D1: start -> goal via start-goal (in transit)",
+    ]
+
+
+def test_flight_log_shows_arrivals_and_deliveries_without_a_transport_verb(
+) -> None:
+    """An arrival at an intermediate hub is arrived, the arrival at the end
+    hub is delivered, whatever the transport mode of the leg (BUG-012)."""
+    log = AirlinesVisualizer()
+    for event in (
+        TurnStarted(1),
+        AgentMoved(1, "D1", "start", "a", False),
+        TurnFinished(1, (("D1", "a"),)),
+        TurnStarted(2),
+        AgentMoved(2, "D1", "a", "goal", True),
+        TurnFinished(2, (("D1", "goal"),)),
+    ):
+        log.handle(event)
+
+    assert log.render() == [
+        "Turn 1",
+        "  D1: start -> a (arrived)",
+        "Turn 2",
+        "  D1: a -> goal (delivered)",
     ]

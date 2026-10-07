@@ -27,6 +27,7 @@ named by their scope, not by a predicted pull request number.
 | [DECISION-010](#decision-010) | Should an aircraft move to an intermediate hub when no route to its destination is available? | `OPEN` | — |
 | [DECISION-011](#decision-011) | Should a restricted hub add travel time on lanes with a distance? | `OPEN` | — |
 | [DECISION-012](#decision-012) | Should the movement events and `TurnFinished.movements` be derived from turn results, or replaced by them? | `OPEN` | — |
+| [DECISION-013](#decision-013) | What should `CapacitySnapshot` describe? | `OPEN` | — |
 
 ---
 
@@ -187,8 +188,10 @@ Details are in [dynamic-routing.md](dynamic-routing.md#evidence).
 ### How are turns without movement represented in the output?
 
 - **Status:** `OPEN`
-- **To be decided in:** the Output & event audit step, together
-  with how waiting, reroutes, and diversions are shown.
+- **To be decided in:** not scheduled. The Output & event audit
+  ([ADR-023](decisions.md#adr-023)) moved the movement filter into the
+  output but left this question open: how the assignment-style text output
+  shows turns without movement, waiting, and transit.
 
 **Context.** The output format of the original assignment prints one line per
 turn and omits aircraft that do not move. On long distance-based legs a turn
@@ -675,3 +678,59 @@ its events in order and that `movement_tokens` of each result equals
 - Whether events built from outcomes would keep their current timing: a
   move is reported as it happens, while a result exists only once the turn
   completes.
+
+---
+
+## DECISION-013
+
+### What should `CapacitySnapshot` describe?
+
+- **Status:** `OPEN`
+- **To be decided in:** a separate design step, after parser hardening.
+
+**Context.** At the end of every turn the simulator emits a
+`CapacitySnapshot` with a count and a capacity for every hub and every
+lane. [ADR-008](decisions.md#adr-008) says it reports physical occupancy,
+the aircraft in a hub, not the load used for admission. Its only consumer
+is `--capacity-info`; the invariant checker does not use it
+([ADR-004](decisions.md#adr-004)).
+
+**Current behavior.** The counts mix two notions:
+
+- **Hubs:** the aircraft waiting at the start of the turn, plus the
+  arrivals of the turn, minus its departures. This is roughly the
+  occupancy at the end of the turn.
+- **End hub:** only the aircraft delivered in this turn. Aircraft
+  delivered earlier are no longer counted.
+- **Lanes:** aircraft on a multi-turn leg at the start of the turn, which
+  includes those arriving in it, plus the departures of the turn,
+  including one-turn legs. This is the use of the lane during the turn,
+  not its occupancy at the end.
+
+Examples, without weather:
+
+- One aircraft on a 900 km air lane: on turn 3 it is delivered, and the
+  snapshot shows the end hub at 1 and the lane at 1.
+- Two aircraft on a lane without distance, delivered on turns 1 and 2: on
+  turn 2 the end hub shows 1, although both aircraft are there, and the
+  lane shows 1 although no aircraft is on it at the end of the turn.
+
+`test_capacity_info_follows_every_turn` in
+`tests/integration/test_cli_output.py` fixes this behavior for one map.
+The simulation decides with its own counters: the hub counts of the
+snapshot take part in no decision, and the lane counts mirror the
+dictionary that lane admission uses. Changing what the snapshot reports
+would therefore change only the observable output and its tests.
+
+**Possible directions.**
+
+1. Physical state at the end of the turn.
+2. Activity or use of each resource during the turn.
+3. Separate concepts, for example hub occupancy and lane usage reported
+   apart.
+
+**Evidence needed.**
+
+- Who reads `--capacity-info`, and for what: checking capacity, or
+  following traffic.
+- Whether the end hub should count all delivered aircraft or none.
