@@ -10,9 +10,10 @@ distance travel-time formula leave no room for another valid answer.
 import pytest
 
 from airlanes.events import AgentInTransit, AgentRerouted, WeatherChanged
+from airlanes.model.connection import Connection
 from airlanes.model.graph import Graph
 from airlanes.model.transport_mode import TransportMode
-from airlanes.model.zone import ZoneType
+from airlanes.model.zone import Zone, ZoneType
 from airlanes.results import Arrival, Departure, Reroute, TurnResult
 from airlanes.simulation.deadlock import DeadlockError
 from airlanes.simulation.engine import Simulator
@@ -301,6 +302,56 @@ def test_weather_cannot_describe_a_connection_the_map_lacks() -> None:
 
     with pytest.raises(ValueError):
         run_simulation(graph, 1, weather)
+
+
+def test_a_graph_whose_start_hub_is_its_end_hub_is_rejected() -> None:
+    """The map parser rejects such a map; a graph built in code must fail
+    the same way, before any turn, rather than leave aircraft at the end
+    hub with an empty, undelivered route."""
+    graph = Graph()
+    graph.add_zone(Zone("hub", 0, 0, is_start=True, is_end=True))
+    simulator = Simulator(graph, 1)
+
+    with pytest.raises(ValueError, match="must be different"):
+        simulator.run()
+    assert simulator.turns == []
+
+
+def test_an_end_zone_not_marked_as_an_end_hub_is_rejected() -> None:
+    """Aircraft are delivered when they reach a hub marked as an end hub.
+    If the graph's end zone is not marked, its aircraft would wait there
+    forever with an empty route; the graph is rejected before any turn."""
+    graph = build_graph([start_hub(), end_hub()], [Link("start", "goal")])
+    assert graph.end_zone is not None
+    graph.end_zone.is_end = False
+    simulator = Simulator(graph, 1)
+
+    with pytest.raises(ValueError, match="not marked as an end zone"):
+        simulator.run()
+    assert simulator.turns == []
+
+
+def test_a_graph_with_two_zones_of_the_same_name_is_rejected() -> None:
+    """`Graph.add_zone` keeps only the last zone of a name, while lanes and
+    the end zone still refer to the first. Here the end hub shares its name
+    with the hub before it: a road leg then an air leg, so routing does not
+    prune the second `a`, and the step between them would look like a
+    planned wait. The graph is rejected before any turn."""
+    graph = Graph()
+    start = Zone("s", 0, 0, is_start=True)
+    hub_a = Zone("a", 1, 0)
+    end_a = Zone("a", 2, 0, is_end=True)
+    for zone in (start, hub_a, end_a):
+        graph.add_zone(zone)
+    road = Connection(start, hub_a, 1, TransportMode.ROAD)
+    road.distance = 100
+    graph.add_connection(road)
+    graph.add_connection(Connection(hub_a, end_a))
+    simulator = Simulator(graph, 1)
+
+    with pytest.raises(ValueError, match="zone names must be unique"):
+        simulator.run()
+    assert simulator.turns == []
 
 
 # --- Dynamic replanning (ADR-018, ADR-021) ----------------------------------

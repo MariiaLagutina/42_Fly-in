@@ -65,6 +65,20 @@ class Simulator:
     def _assign_paths(self) -> None:
         if self.graph.start_zone is None or self.graph.end_zone is None:
             raise ValueError("Graph must have start and end zones.")
+        if self.graph.start_zone is self.graph.end_zone:
+            raise ValueError("Graph start and end zones must be different.")
+        if not self.graph.end_zone.is_end:
+            raise ValueError("Graph end zone is not marked as an end zone.")
+        # Routing and execution identify hubs by name, so every hub in use
+        # must be the one registered under its name.
+        in_use = [self.graph.start_zone, self.graph.end_zone]
+        for connection in self.graph.connections:
+            in_use += [connection.zone_a, connection.zone_b]
+        if any(self.graph.zones.get(zone.name) is not zone for zone in in_use):
+            raise ValueError(
+                "Graph uses a zone that is not the one registered under its "
+                "name; zone names must be unique."
+            )
 
         reservations: dict[tuple[str, int], int] = {}
         conn_reserv: dict[tuple[str, int], int] = {}
@@ -292,13 +306,13 @@ class Simulator:
             if drone.transit_turns_left > 0:
                 continue
 
+            # A leg in transit always has its destination and lane: both
+            # are set together with the state at departure.
             target = drone.transit_target
-            if target is None:
-                continue
+            lane = drone.transit_connection_name
+            assert target is not None and lane is not None
 
             origin = drone.current_zone.name
-            lane = drone.transit_connection_name
-            assert lane is not None
             drone.current_zone = target
             drone.transit_target = None
             drone.transit_connection_name = None
@@ -334,9 +348,10 @@ class Simulator:
     ) -> None:
         """Apply moves already checked by `select_feasible_moves`."""
         for drone, connection in planned_moves:
+            # Every kept move was planned from the aircraft's next hub, and
+            # no route changes between planning and this point.
             next_zone = drone.next_zone()
-            if next_zone is None:
-                continue
+            assert next_zone is not None
 
             current_count = zone_occupancy.get(next_zone.name, 0)
             zone_occupancy[drone.current_zone.name] -= 1
@@ -377,9 +392,8 @@ class Simulator:
             zone_occupancy[next_zone.name] = current_count + 1
             origin = drone.current_zone.name
             moved_to = drone.advance()
+            assert moved_to is not None
 
-            if moved_to is None:
-                continue
             if moved_to.is_end:
                 drone.state = DroneState.DELIVERED
             else:
@@ -427,15 +441,15 @@ class Simulator:
     def _count_active_connection_usage(self) -> dict[str, int]:
         connection_usage: dict[str, int] = {}
         for drone in self.drones:
-            if (
-                drone.state == DroneState.IN_TRANSIT
-                and drone.transit_connection_name is not None
-                and drone.transit_turns_left > 0
-            ):
-                conn_name = drone.transit_connection_name
-                connection_usage[conn_name] = (
-                    connection_usage.get(conn_name, 0) + 1
-                )
+            if drone.state != DroneState.IN_TRANSIT:
+                continue
+            # Counted before this turn's arrivals: a leg in transit has its
+            # lane and at least one turn left.
+            conn_name = drone.transit_connection_name
+            assert conn_name is not None and drone.transit_turns_left > 0
+            connection_usage[conn_name] = (
+                connection_usage.get(conn_name, 0) + 1
+            )
         return connection_usage
 
     def _emit_capacity_snapshot(

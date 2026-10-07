@@ -116,18 +116,19 @@ def _deadlocked_aircraft(
         hub = drone.current_zone
         if drone.state == DroneState.IN_TRANSIT:
             assert drone.transit_target is not None
+            assert drone.transit_connection_name is not None
             hub = drone.transit_target
-            if drone.transit_connection_name is not None:
-                on_lane.setdefault(
-                    drone.transit_connection_name, []
-                ).append(drone.drone_id)
+            on_lane.setdefault(
+                drone.transit_connection_name, []
+            ).append(drone.drone_id)
         holders.setdefault(hub.name, []).append(drone.drone_id)
 
     blockers: dict[int, set[int]] = {}
     for drone in blocked:
+        # A blocked aircraft was a departure candidate, planned from its
+        # next hub; only kept moves were applied since.
         next_zone = drone.next_zone()
-        if next_zone is None:
-            continue
+        assert next_zone is not None
         connection = graph.get_connection(drone.current_zone, next_zone)
         assert connection is not None
         waits_for: set[int] = set()

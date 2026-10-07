@@ -33,20 +33,23 @@ def plan_departures(
             drone.is_delivered()
             or drone.state == DroneState.IN_TRANSIT
             or drone.drone_id in moved_drone_ids
-            or not drone.has_path()
         ):
             continue
 
+        # An aircraft that is neither delivered nor in transit still has a
+        # route, which ends at the end hub.
         next_zone = drone.next_zone()
-        if next_zone is None:
-            continue
+        assert next_zone is not None
 
         if next_zone.name == drone.current_zone.name:
             drone.advance()
             continue
 
+        # A route only steps along lanes. Whether the lane is open now
+        # depends on the weather.
         connection = graph.get_connection(drone.current_zone, next_zone)
-        if connection is None or not is_available(
+        assert connection is not None
+        if not is_available(
             connection, weather.condition_of(connection.name())
         ):
             continue
@@ -151,9 +154,9 @@ def _admit_to_hubs(
         kept: list[tuple[Drone, Connection]] = []
 
         for drone, connection in selected:
+            # Every move was planned from the aircraft's next hub.
             next_zone = drone.next_zone()
-            if next_zone is None:
-                continue
+            assert next_zone is not None
             name = next_zone.name
             used = (
                 load.get(name, 0)
@@ -177,10 +180,9 @@ def _count_hub_load(drones: list[Drone]) -> dict[str, int]:
         if drone.is_delivered():
             continue
         hub = drone.current_zone
-        if (
-            drone.state == DroneState.IN_TRANSIT
-            and drone.transit_target is not None
-        ):
+        if drone.state == DroneState.IN_TRANSIT:
+            # The destination slot is held from departure (ADR-008).
+            assert drone.transit_target is not None
             hub = drone.transit_target
         load[hub.name] = load.get(hub.name, 0) + 1
     return load

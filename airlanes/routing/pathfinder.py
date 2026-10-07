@@ -177,8 +177,8 @@ class Pathfinder:
                 next_road_km: int | None = road_km
                 if next_zone != current_zone:
                     conn = self.graph.get_connection(current_zone, next_zone)
-                    if conn is not None:
-                        next_road_km = self.policy.road_km_after(road_km, conn)
+                    assert conn is not None
+                    next_road_km = self.policy.road_km_after(road_km, conn)
                 if next_road_km is None:
                     continue
 
@@ -318,9 +318,9 @@ class Pathfinder:
         if next_zone == current_zone:
             return 1
 
+        # Planned steps come from graph neighbors, so a lane joins them.
         conn = self.graph.get_connection(current_zone, next_zone)
-        if not conn:
-            return int(next_zone.movement_cost())
+        assert conn is not None
 
         return travel_time(conn, next_zone, WeatherCondition.CLEAR)
 
@@ -348,14 +348,14 @@ class Pathfinder:
             cost = self._calculate_move_cost(current_zone, next_zone)
             if next_zone != current_zone:
                 conn = self.graph.get_connection(current_zone, next_zone)
-                if conn:
-                    if conn.distance > 0:
-                        key = self._departure_key(conn.name(), current_zone)
-                        conn_reserv[(key, t)] = 1
-                    for tau in range(t, t + cost):
-                        conn_reserv[(conn.name(), tau)] = (
-                            conn_reserv.get((conn.name(), tau), 0) + 1
-                        )
+                assert conn is not None
+                if conn.distance > 0:
+                    key = self._departure_key(conn.name(), current_zone)
+                    conn_reserv[(key, t)] = 1
+                for tau in range(t, t + cost):
+                    conn_reserv[(conn.name(), tau)] = (
+                        conn_reserv.get((conn.name(), tau), 0) + 1
+                    )
             if not next_zone.is_start and not next_zone.is_end:
                 for tau in self._held_turns(
                     current_zone, next_zone, t, cost
@@ -403,8 +403,7 @@ class Pathfinder:
             return True
 
         conn = self.graph.get_connection(curr_zone, next_zone)
-        if not conn:
-            return True
+        assert conn is not None
 
         if conn.distance > 0:
             key = self._departure_key(conn.name(), curr_zone)
