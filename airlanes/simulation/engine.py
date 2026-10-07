@@ -13,7 +13,6 @@ from airlanes.model.connection import Connection
 from airlanes.model.drone import Drone, DroneState
 from airlanes.model.graph import Graph
 from airlanes.model.transport_mode import TransportMode
-from airlanes.model.zone import Zone
 from airlanes.results import (
     Arrival,
     Departure,
@@ -102,9 +101,6 @@ class Simulator:
             self.pathfinder.reserve_path(
                 path, reservations, conn_reserv, global_usage
             )
-
-    def _path_cost(self, path: list[Zone]) -> int:
-        return sum(zone.movement_cost() for zone in path[1:])
 
     def run(self) -> list[TurnResult]:
         """
@@ -478,11 +474,3 @@ class Simulator:
             for connection in self.graph.connections
         )
         self._emit(CapacitySnapshot(turn_number, zone_usage, link_usage))
-
-    def print_stats(self) -> None:
-        print(f"Total turns: {len(self.turns)}")
-        for drone in self.drones:
-            print(
-                f"{drone.label}: Path length={len(drone.path)}, "
-                f"Delivered={drone.is_delivered()}"
-            )

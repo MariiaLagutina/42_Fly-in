@@ -1,9 +1,7 @@
 """Pathfinder: shape of planned routes, reachability, and the road budget.
 
 Only the API the simulator uses is tested. Search order, cost weights, and
-the reservation table format are implementation details, and the unused
-search methods (`find_path_bfs`, `find_path_dijkstra`, `find_multiple_paths`,
-`heuristic`) are intentionally not covered.
+the reservation table format are implementation details.
 """
 
 import math

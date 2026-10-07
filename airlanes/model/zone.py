@@ -22,7 +22,6 @@ class Zone:
         max_drones: int = 1,
         is_start: bool = False,
         is_end: bool = False,
-        reservations: int = 0,
     ) -> None:
         """Initialize zone configuration and state."""
         self.name = name
@@ -33,7 +32,6 @@ class Zone:
         self.max_drones = max_drones
         self.is_start = is_start
         self.is_end = is_end
-        self.reservations: int = reservations
         self.population: int = 0
         self.explicit_max_drones: bool = False
 

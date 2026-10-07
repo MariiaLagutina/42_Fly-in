@@ -1,4 +1,3 @@
-from collections import deque
 import heapq
 import math
 from typing import TypeAlias
@@ -10,7 +9,6 @@ from airlanes.routing.policy import RoutingPolicy
 from airlanes.world.transport import is_available, travel_time
 from airlanes.world.weather import WeatherCondition, WeatherState
 
-PathHeapItem: TypeAlias = tuple[float, int, Zone, list[Zone]]
 TimedPathHeapItem: TypeAlias = tuple[float, int, int, int, Zone, list[Zone]]
 RouteHeapItem: TypeAlias = tuple[int, int, int, Zone, list[Zone]]
 
@@ -23,91 +21,6 @@ class Pathfinder:
     ) -> None:
         self.graph = graph
         self.policy = policy if policy is not None else RoutingPolicy()
-
-    def find_path_bfs(self, start: Zone, end: Zone) -> list[Zone]:
-        """Finds the shortest structural route using BFS without weights."""
-        visited = set()
-        queue = deque([(start, [start])])
-
-        while queue:
-            current_zone, path = queue.popleft()
-            if current_zone in visited:
-                continue
-            visited.add(current_zone)
-
-            if current_zone == end:
-                return path
-
-            for neighbor in self.graph.get_neighbors(current_zone):
-                if neighbor not in visited:
-                    queue.append((neighbor, path + [neighbor]))
-
-        return []
-
-    def find_path_dijkstra(
-        self, start: Zone, end: Zone
-    ) -> tuple[list[Zone], float]:
-        """Calculates the lowest-cost static path using Dijkstra."""
-        visited = set()
-        counter = 0
-        min_heap: list[PathHeapItem] = [(0.0, counter, start, [start])]
-
-        while min_heap:
-            cost, _, current_zone, path = heapq.heappop(min_heap)
-            if current_zone in visited:
-                continue
-            visited.add(current_zone)
-
-            if current_zone == end:
-                return path, cost
-
-            for neighbor in self.graph.get_neighbors(current_zone):
-                if neighbor not in visited:
-                    total_cost = cost + self._pathfinding_cost(neighbor)
-                    counter += 1
-                    heapq.heappush(
-                        min_heap,
-                        (total_cost, counter, neighbor, path + [neighbor]),
-                    )
-
-        return [], SimulationConfig.UNREACHABLE_COST
-
-    def find_multiple_paths(
-        self, start: Zone, end: Zone, n: int
-    ) -> list[list[Zone]]:
-        """Finds up to n distinct paths to distribute drone traffic."""
-        if n <= 0:
-            return []
-
-        counter = 0
-        found_paths: list[list[Zone]] = []
-        seen_complete_paths: set[tuple[str, ...]] = set()
-        min_heap: list[tuple[float, int, list[Zone]]] = [
-            (0.0, counter, [start])
-        ]
-
-        while min_heap and len(found_paths) < n:
-            cost, _, path = heapq.heappop(min_heap)
-            current_zone = path[-1]
-
-            if current_zone == end:
-                path_key = tuple(zone.name for zone in path)
-                if path_key not in seen_complete_paths:
-                    seen_complete_paths.add(path_key)
-                    found_paths.append(path)
-                continue
-
-            for neighbor in self.graph.get_neighbors(current_zone):
-                if neighbor in path:
-                    continue
-
-                counter += 1
-                new_cost = cost + self._pathfinding_cost(neighbor)
-                heapq.heappush(
-                    min_heap, (new_cost, counter, path + [neighbor])
-                )
-
-        return found_paths
 
     def find_cooperative_path(
         self,
@@ -415,22 +328,3 @@ class Pathfinder:
                 return False
 
         return True
-
-    def _pathfinding_cost(self, zone: Zone) -> float:
-        """Returns the base movement cost plus traffic penalties."""
-        reservation_penalty = (
-            SimulationConfig.RESERVATION_PENALTY_WEIGHT * zone.reservations
-            if hasattr(zone, "reservations")
-            else 0
-        )
-        if zone.zone_type.name == "PRIORITY":
-            return (
-                SimulationConfig.PRIORITY_ZONE_BASE_COST + reservation_penalty
-            )
-        return float(zone.movement_cost()) + reservation_penalty
-
-    def heuristic(self, zone: Zone, end: Zone) -> float:
-        """Estimates cost using straight-line Euclidean distance."""
-        dx = float(zone.x - end.x)
-        dy = float(zone.y - end.y)
-        return math.sqrt((dx * dx) + (dy * dy))
