@@ -10,6 +10,7 @@ distance travel-time formula leave no room for another valid answer.
 import pytest
 
 from airlanes.events import AgentInTransit, AgentRerouted, WeatherChanged
+from airlanes.model.connection import Connection
 from airlanes.model.graph import Graph
 from airlanes.model.transport_mode import TransportMode
 from airlanes.model.zone import Zone, ZoneType
@@ -326,6 +327,29 @@ def test_an_end_zone_not_marked_as_an_end_hub_is_rejected() -> None:
     simulator = Simulator(graph, 1)
 
     with pytest.raises(ValueError, match="not marked as an end zone"):
+        simulator.run()
+    assert simulator.turns == []
+
+
+def test_a_graph_with_two_zones_of_the_same_name_is_rejected() -> None:
+    """`Graph.add_zone` keeps only the last zone of a name, while lanes and
+    the end zone still refer to the first. Here the end hub shares its name
+    with the hub before it: a road leg then an air leg, so routing does not
+    prune the second `a`, and the step between them would look like a
+    planned wait. The graph is rejected before any turn."""
+    graph = Graph()
+    start = Zone("s", 0, 0, is_start=True)
+    hub_a = Zone("a", 1, 0)
+    end_a = Zone("a", 2, 0, is_end=True)
+    for zone in (start, hub_a, end_a):
+        graph.add_zone(zone)
+    road = Connection(start, hub_a, 1, TransportMode.ROAD)
+    road.distance = 100
+    graph.add_connection(road)
+    graph.add_connection(Connection(hub_a, end_a))
+    simulator = Simulator(graph, 1)
+
+    with pytest.raises(ValueError, match="zone names must be unique"):
         simulator.run()
     assert simulator.turns == []
 

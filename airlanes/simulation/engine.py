@@ -69,6 +69,16 @@ class Simulator:
             raise ValueError("Graph start and end zones must be different.")
         if not self.graph.end_zone.is_end:
             raise ValueError("Graph end zone is not marked as an end zone.")
+        # Routing and execution identify hubs by name, so every hub in use
+        # must be the one registered under its name.
+        in_use = [self.graph.start_zone, self.graph.end_zone]
+        for connection in self.graph.connections:
+            in_use += [connection.zone_a, connection.zone_b]
+        if any(self.graph.zones.get(zone.name) is not zone for zone in in_use):
+            raise ValueError(
+                "Graph uses a zone that is not the one registered under its "
+                "name; zone names must be unique."
+            )
 
         reservations: dict[tuple[str, int], int] = {}
         conn_reserv: dict[tuple[str, int], int] = {}
