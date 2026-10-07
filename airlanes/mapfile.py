@@ -1,3 +1,5 @@
+import codecs
+import io
 import re
 
 from airlanes.model.connection import Connection
@@ -23,8 +25,9 @@ class Parser:
         graph = Graph()
         nb_drones = 0
 
-        with open(filepath, "r") as file:
-            for line_num, line in enumerate(file, start=1):
+        with open(filepath, "rb") as file:
+            lines = self._read_lines(file.read())
+            for line_num, line in enumerate(lines, start=1):
                 line = line.strip()
 
                 if not line or line.startswith("#"):
@@ -63,6 +66,31 @@ class Parser:
             raise ParseError(0, "End zone not defined.")
 
         return graph, nb_drones
+
+    @staticmethod
+    def _read_lines(data: bytes) -> list[str]:
+        """
+        The lines of a map file. A map is UTF-8, optionally with a byte
+        order mark at the start of the file. Lines end with LF, CRLF or a
+        solitary CR, as in text mode.
+        """
+        if data.startswith(codecs.BOM_UTF8):
+            data = data[len(codecs.BOM_UTF8):]
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            # Everything before the first invalid byte is valid UTF-8.
+            before = Parser._split_lines(data[:exc.start].decode("utf-8"))
+            line_num = len(before)
+            if not before or before[-1].endswith("\n"):
+                line_num += 1
+            raise ParseError(line_num, "Map file is not valid UTF-8.") from exc
+        return Parser._split_lines(text)
+
+    @staticmethod
+    def _split_lines(text: str) -> list[str]:
+        """Split as text mode does: CRLF and a solitary CR become LF."""
+        return io.StringIO(text, newline=None).readlines()
 
     def _validate_new_zone(
         self, graph: Graph, zone: Zone, line_num: int

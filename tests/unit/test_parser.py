@@ -97,6 +97,75 @@ def test_blank_lines_comments_indentation_and_crlf_are_accepted(
     assert graph.end_zone is not None
 
 
+@pytest.mark.parametrize(
+    "newline", ["\n", "\r\n", "\r"], ids=["lf", "crlf", "cr"]
+)
+def test_every_line_ending_separates_lines(
+    write_map: MapWriter, newline: str
+) -> None:
+    lines = ["# comment", "", "nb_drones: 2", "start_hub: start 0 0",
+             "end_hub: goal 1 0", "hub: broken"]
+
+    with pytest.raises(ParseError) as excinfo:
+        parse(write_map(newline.join(lines) + newline))
+
+    assert excinfo.value.line_number == 6
+
+
+def test_mixed_line_endings_keep_line_numbers(write_map: MapWriter) -> None:
+    text = (
+        "nb_drones: 2\r"
+        "start_hub: start 0 0\r\n"
+        "end_hub: goal 1 0\n"
+        "\r"
+        "hub: broken\n"
+    )
+
+    with pytest.raises(ParseError) as excinfo:
+        parse(write_map(text))
+
+    assert excinfo.value.line_number == 5
+
+
+def test_a_byte_order_mark_at_the_start_is_accepted(
+    write_map: MapWriter,
+) -> None:
+    graph, nb_drones = parse(write_map("﻿" + HEADER))
+
+    assert nb_drones == 2
+    assert graph.start_zone is not None
+
+
+def test_a_byte_order_mark_elsewhere_is_rejected(
+    write_map: MapWriter,
+) -> None:
+    with pytest.raises(ParseError) as excinfo:
+        parse(write_map(HEADER + "﻿hub: mid 1 0\n"))
+
+    assert excinfo.value.line_number == 4
+
+
+@pytest.mark.parametrize(
+    ("before", "expected_line"),
+    [
+        pytest.param(b"", 4, id="line-start"),
+        pytest.param(b"hub: caf", 4, id="mid-line"),
+        pytest.param(b"\r", 5, id="after-solitary-cr"),
+    ],
+)
+def test_invalid_utf8_raises_parse_error_with_its_line_number(
+    tmp_path: Path, before: bytes, expected_line: int
+) -> None:
+    path = tmp_path / "map.txt"
+    path.write_bytes(HEADER.encode() + before + b"\xe9 1 0\n")
+
+    with pytest.raises(ParseError) as excinfo:
+        parse(path)
+
+    assert excinfo.value.line_number == expected_line
+    assert excinfo.value.message == "Map file is not valid UTF-8."
+
+
 def test_negative_coordinates_are_accepted(write_map: MapWriter) -> None:
     graph, _ = parse(write_map(HEADER + "hub: west -2 -5\n"))
 
