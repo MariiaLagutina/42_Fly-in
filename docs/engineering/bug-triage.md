@@ -19,6 +19,7 @@ are in [decisions.md](decisions.md).
 | `IN PROGRESS` | Fix being implemented |
 | `FIXED` | Fix and regression test implemented in the linked pull request |
 | `VERIFIED` | Fixed, and the regression test plus the full invariant suite pass |
+| `RESOLVED` | Recorded technical debt has been removed or otherwise closed; deletion-only cleanup does not require a behavioral regression test |
 
 An entry moves to `FIXED` only together with an actual fix and its regression
 test, and to `VERIFIED` only after the regression test and the full invariant
@@ -965,10 +966,10 @@ later.
 
 | Field | Value |
 | --- | --- |
-| Status | `VERIFIED` |
+| Status | `RESOLVED` |
 | Discovered during | Pathfinding and simulation test audit (PR #4), 2026-10-03 |
 | Resolution | Removed in PR #23 (Stage 3 dead-code cleanup), 2026-10-07 |
-| Regression test | Not applicable: the code is removed. `mypy --strict` and `flake8` fail on any remaining reference. |
+| Regression test | Not applicable: this resolution removes unreachable code rather than changing supported behavior. |
 | Verification | Full suite passes. Simulation results on the bundled maps, command-line output, and the text-output snapshot are unchanged. |
 
 The code below was never called by the simulation and has been removed:
@@ -993,10 +994,10 @@ The code below was never called by the simulation and has been removed:
 
 | Field | Value |
 | --- | --- |
-| Status | `VERIFIED` |
+| Status | `RESOLVED` |
 | Discovered during | Core unit test audit (PR #3), 2026-10-03 |
 | Resolution | Removed in PR #23 (Stage 3 dead-code cleanup), 2026-10-07 |
-| Regression test | Not applicable: the state is removed. `mypy --strict` and `flake8` fail on any remaining reference. |
+| Regression test | Not applicable: this resolution removes unreachable code rather than changing supported behavior. |
 | Verification | As for [TD-001](#td-001--unused-pathfinding-and-simulation-code). |
 
 The state below was never used by the simulation and has been removed:
