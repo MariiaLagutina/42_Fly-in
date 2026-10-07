@@ -590,8 +590,9 @@ connection: start-goal [max_link_capacity=²]
 
 - The numeric fields are checked with `str.isdecimal()`, which accepts
   exactly the digits `int()` converts. A superscript digit gives the field's
-  usual parse error with its line number. An invalid population is still
-  ignored, as before.
+  usual parse error with its line number. An invalid population was still
+  ignored at the time of PR #16; [ADR-025](decisions.md#adr-025) later made
+  it a parse error.
 - Any other `OSError` while the map file is read and parsed prints
   `Cannot read map file: <path>: <reason>` and exits with status 1.
 
@@ -972,6 +973,7 @@ The sprite drawn for an aircraft at a hub is unchanged.
 | Resolution | Fixed with the map parsing policy ([ADR-025](decisions.md#adr-025)): the map is decoded as UTF-8, and invalid bytes are a parse error |
 | Regression test | `test_invalid_utf8_raises_parse_error_with_its_line_number` in `tests/unit/test_parser.py`; `test_a_map_that_is_not_utf8_exits_with_a_parse_error` in `tests/integration/test_cli_errors.py`. Both fail before the fix. |
 | Verification | Full suite passes, including the line-ending tests for LF, CRLF, solitary CR, and mixed endings. Bundled maps parse to the same model. |
+| Related PR | PR #25 |
 
 **Violated expected behavior.** A map that cannot be used stops the program
 with a clear error naming the line and the cause, not a crash.
@@ -1012,6 +1014,7 @@ LF, CRLF, and a solitary CR keep their line numbers.
 | Resolution | Fixed with the map parsing policy ([ADR-025](decisions.md#adr-025)): a connection must join two different hubs |
 | Regression test | `test_contradictory_declarations_raise_parse_error` (`self-loop`, `self-loop-at-a-connected-hub`) in `tests/unit/test_parser.py`. Both fail before the fix. |
 | Verification | Full suite passes. Bundled maps parse to the same model. |
+| Related PR | PR #25 |
 
 **Violated expected behavior.** A map line gets one answer, whatever the
 lines around it.
@@ -1057,6 +1060,7 @@ hub twice.
 | Resolution | Fixed with the map parsing policy ([ADR-025](decisions.md#adr-025)): hub names cannot contain `-`, `[`, or `]` |
 | Regression test | `test_contradictory_declarations_raise_parse_error` (`hub-name-with-hyphen`, `start-name-with-hyphen`, and the bracket cases) in `tests/unit/test_parser.py`. They fail before the fix. |
 | Verification | Full suite passes. Bundled maps parse to the same model; none uses these characters. |
+| Related PR | PR #25 |
 
 **Violated expected behavior.** The original assignment forbids dashes in
 hub names, because the connection syntax uses them.
