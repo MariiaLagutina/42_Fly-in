@@ -79,7 +79,7 @@ Both accept one map file and these options:
 | _(none)_ | Compact text: one line per turn, one `D<n>-<destination>` token per moving aircraft |
 | `--visual` | The same text, colored with ANSI codes from the map's hub colors |
 | `--airlines` | Readable flight log: departures on legs of more than one turn and arrivals, by turn |
-| `--capacity-info` | Adds per-turn hub and lane usage, for example `Hamburg=2/18` |
+| `--capacity-info` | Adds, per turn, each hub's committed load after the turn (aircraft in it plus aircraft flying to it, for example `Hamburg=2/18`) and each lane's usage during the turn; start and end hubs are unlimited and not listed |
 | `--pygame` | Standard Pygame turn viewer for any map |
 | `--pygame-airlines` | Aviation dispatch center with dynamic weather |
 
@@ -225,8 +225,8 @@ Weather is random and not seeded, so two runs of the same map can differ.
   the first leg after weather changed the route, and, at an intermediate
   hub, `LANDED` after an air leg or `ARRIVED` after a road leg
 - weather alerts in the sidebar
-- clicking a city prints a hub report (population, hub type, current load)
-  to the terminal
+- clicking a city prints a hub report (population, hub type, and the hub's
+  committed load in the replayed turn) to the terminal
 
 The viewer replays the recorded event stream, so it can step backwards and
 forwards through time.
