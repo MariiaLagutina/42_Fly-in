@@ -60,15 +60,49 @@ def test_capacity_info_follows_every_turn(tmp_path: Path) -> None:
     assert stdout == (
         "D1-start-goal\n"
         "Turn 1 capacity\n"
-        "  zones: start=0/inf, goal=0/inf\n"
+        "  hubs: none\n"
         "  links: start-goal=1/2\n"
         "Turn 2 capacity\n"
-        "  zones: start=0/inf, goal=0/inf\n"
+        "  hubs: none\n"
         "  links: start-goal=1/2\n"
         "D1-goal\n"
         "Turn 3 capacity\n"
-        "  zones: start=0/inf, goal=1/inf\n"
+        "  hubs: none\n"
         "  links: start-goal=1/2\n"
+    )
+
+
+def test_capacity_info_reports_committed_hub_load(tmp_path: Path) -> None:
+    """While the aircraft flies to `b`, nobody is in it, but the aircraft
+    holds its only slot (ADR-026). Start and end hubs are not listed."""
+    map_file = tmp_path / "via_hub.txt"
+    map_file.write_text(
+        "nb_drones: 1\n"
+        "start_hub: start 0 0\n"
+        "hub: b 1 0 [max_drones=1]\n"
+        "end_hub: goal 2 0\n"
+        "connection: start-b [distance=900km]\n"
+        "connection: b-goal\n"
+    )
+
+    stdout = run_cli(str(map_file), "--capacity-info")
+
+    assert stdout == (
+        "D1-start-b\n"
+        "Turn 1 capacity\n"
+        "  hubs: b=1/1\n"
+        "  links: start-b=1/2, b-goal=0/1\n"
+        "Turn 2 capacity\n"
+        "  hubs: b=1/1\n"
+        "  links: start-b=1/2, b-goal=0/1\n"
+        "D1-b\n"
+        "Turn 3 capacity\n"
+        "  hubs: b=1/1\n"
+        "  links: start-b=1/2, b-goal=0/1\n"
+        "D1-goal\n"
+        "Turn 4 capacity\n"
+        "  hubs: b=0/1\n"
+        "  links: start-b=0/2, b-goal=1/1\n"
     )
 
 

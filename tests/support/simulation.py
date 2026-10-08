@@ -394,6 +394,44 @@ def delivery_turns(run: SimulationRun) -> dict[str, int]:
     }
 
 
+def committed_hub_load_by_turn(
+    run: SimulationRun,
+) -> dict[int, dict[str, int]]:
+    """
+    The committed load of every hub at the end of every turn, rebuilt from
+    movement events alone: the aircraft in the hub plus the aircraft flying
+    towards it (ADR-008). Delivered aircraft no longer count.
+    """
+    start = run.graph.start_zone
+    assert start is not None
+    # A hub name, or the destination of a leg in progress.
+    positions: dict[str, str | _InTransit] = {
+        f"D{number}": start.name for number in range(1, run.nb_aircraft + 1)
+    }
+    loads: dict[int, dict[str, int]] = {}
+    for event in run.events:
+        if isinstance(event, AgentInTransit):
+            positions[event.agent_label] = _InTransit(
+                event.connection, event.destination, event.turn_number
+            )
+        elif isinstance(event, AgentMoved):
+            if event.delivered:
+                positions.pop(event.agent_label)
+            else:
+                positions[event.agent_label] = event.destination
+        elif isinstance(event, TurnFinished):
+            load: dict[str, int] = {}
+            for position in positions.values():
+                hub = (
+                    position
+                    if isinstance(position, str)
+                    else position.destination
+                )
+                load[hub] = load.get(hub, 0) + 1
+            loads[event.turn_number] = load
+    return loads
+
+
 def check_outcomes_against_events(run: SimulationRun) -> list[str]:
     """
     Compare the turn results with the event stream of the same run and
