@@ -1,14 +1,14 @@
-"""Dispatch board of the airlines Pygame viewer: flight statuses (BUG-011,
-BUG-012).
+"""Airlines Pygame viewer: flight statuses on the dispatch board (BUG-011,
+BUG-012) and the ATC hub report (ADR-026).
 
-Runs headless with SDL's dummy video driver and records the badges the
-live-departures panel renders after each replayed turn.
+Runs headless with SDL's dummy video driver. The board tests record the
+badges the live-departures panel renders after each replayed turn.
 """
 
 import pygame
 import pytest
 
-from airlanes.events import EventDispatcher
+from airlanes.events import CapacitySnapshot, EventDispatcher
 from airlanes.model.transport_mode import TransportMode
 from airlanes.output.pygame.airlines import (
     AirlinesWindow,
@@ -134,3 +134,111 @@ def test_an_aircraft_at_a_hub_is_described_by_the_leg_it_completed(
         [first_leg, Link("a", "goal", distance=800)],
         ScriptedWeather({}),
     ) == statuses
+
+
+# --- ATC hub report (ADR-026) ------------------------------------------------
+
+
+def airlines_window(
+    monkeypatch: pytest.MonkeyPatch, links: list[Link], nb_aircraft: int
+) -> tuple[AirlinesWindow, list[CapacitySnapshot]]:
+    """A window over a finished run through hub `b`, and the run's capacity
+    snapshots in turn order."""
+    monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
+    graph = build_graph(
+        [start_hub(), hub("b", capacity=3), end_hub()], links
+    )
+    viewer = PygameAirlinesVisualizer(graph)
+    dispatcher = EventDispatcher()
+    dispatcher.add_listener(viewer)
+    Simulator(graph, nb_aircraft, dispatcher).run()
+    snapshots = [
+        event
+        for event in viewer.event_queue
+        if isinstance(event, CapacitySnapshot)
+    ]
+    return AirlinesWindow(viewer), snapshots
+
+
+def hub_load_line(window: AirlinesWindow, name: str) -> str:
+    zone = window.graph.get_zone(name)
+    assert zone is not None
+    report = window._hub_report(zone)
+    assert report[0] == f"[ATC HUB REPORT: {name.upper()}]"
+    return report[-1]
+
+
+def test_hub_report_counts_an_aircraft_flying_to_the_hub(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """On turn 1 the aircraft is on its way to `b`: nobody is in the hub,
+    but it holds one of its slots."""
+    window, _snapshots = airlines_window(
+        monkeypatch,
+        [Link("start", "b", distance=900), Link("b", "goal")],
+        nb_aircraft=1,
+    )
+    try:
+        window._goto_turn(1)
+        assert window.drone_positions["D1"].kind == "connection"
+        assert hub_load_line(window, "b") == (
+            "  -> Hub Load:            1 / 3 aircraft"
+        )
+    finally:
+        pygame.quit()
+
+
+def test_hub_report_follows_the_replayed_turn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Forward, backward, and back to the start, the report shows the
+    snapshot of the selected turn, never a later or stale one."""
+    window, snapshots = airlines_window(
+        monkeypatch,
+        [Link("start", "b", capacity=3), Link("b", "goal", distance=900)],
+        nb_aircraft=3,
+    )
+    try:
+        loads = [snapshot.hub_load[0][1] for snapshot in snapshots]
+        assert len(set(loads)) > 1
+        last_turn = len(window.turn_indices) - 1
+        assert last_turn == len(snapshots)
+
+        before_turn_1 = "  -> Hub Load:            — (no turn completed yet)"
+        assert hub_load_line(window, "b") == before_turn_1
+
+        order = list(range(1, last_turn + 1))
+        for turn in order + order[::-1]:
+            window._goto_turn(turn)
+            assert hub_load_line(window, "b") == (
+                f"  -> Hub Load:            {loads[turn - 1]} / 3 aircraft"
+            ), turn
+
+        window._goto_turn(last_turn)
+        window._goto_turn(0)
+        assert hub_load_line(window, "b") == before_turn_1
+    finally:
+        pygame.quit()
+
+
+@pytest.mark.parametrize("name", ["start", "goal"])
+def test_hub_report_of_start_and_end_hubs_has_no_capacity(
+    monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    window, _snapshots = airlines_window(
+        monkeypatch,
+        [Link("start", "b", distance=900), Link("b", "goal")],
+        nb_aircraft=1,
+    )
+    try:
+        window._goto_turn(2)
+        zone = window.graph.get_zone(name)
+        assert zone is not None
+        assert window._hub_report(zone) == [
+            f"[ATC HUB REPORT: {name.upper()}]",
+            "  -> Regional Population: 0",
+            "  -> Logistics Type:      NORMAL",
+            "  -> Hub Load:            not applicable (unlimited capacity)",
+        ]
+    finally:
+        pygame.quit()
