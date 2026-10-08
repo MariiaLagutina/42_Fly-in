@@ -145,7 +145,7 @@ def _admit_to_hubs(
     so rejecting one move can invalidate others; selection repeats until
     no move is rejected. The selection only shrinks, so it terminates.
     """
-    load = _count_hub_load(drones)
+    load = count_hub_load(drones)
     selected = moves
 
     while True:
@@ -173,8 +173,12 @@ def _admit_to_hubs(
         selected = kept
 
 
-def _count_hub_load(drones: list[Drone]) -> dict[str, int]:
-    """Aircraft in each hub, plus aircraft flying towards it."""
+def count_hub_load(drones: list[Drone]) -> dict[str, int]:
+    """
+    The committed load of every hub: the aircraft in it, plus the aircraft
+    flying towards it (ADR-008). Departures are admitted against it, and
+    the capacity snapshot reports it after each turn.
+    """
     load: dict[str, int] = {}
     for drone in drones:
         if drone.is_delivered():
