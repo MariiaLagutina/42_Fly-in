@@ -417,8 +417,10 @@ def _phase_section(summaries: list[Summary]) -> str:
         turns = s.phases.get("turn", 0)
         if not run:
             continue
+        # Turn phases are siblings, so their inclusive times do not
+        # overlap; each includes the route searches it calls.
         turn_phases = sorted(
-            ((p.split("/", 1)[1], t) for p, t in own.items()
+            ((p.split("/", 1)[1], t) for p, t in s.phases.items()
              if p.startswith("turn/") and p.count("/") == 1),
             key=lambda item: item[1], reverse=True,
         )
@@ -436,9 +438,11 @@ def _phase_section(summaries: list[Summary]) -> str:
         ))
     return (
         "## Phases\n\nFrom `phases` executions. Plan and turns are shares of "
-        "the run; the cooperative search is a share of planning; turn "
-        "phases are exclusive shares of the turn time, nested route "
-        "searches included in the phase that calls them. Overhead compares "
+        "the run; the cooperative search is a share of planning. Top turn "
+        "phases are shares of the turn time, each including the route "
+        "searches it calls; phases of a turn never nest, so these shares "
+        "do not overlap, and the time outside them is the rest of "
+        "`_execute_turn`. Overhead compares "
         "the median `phases` run with the median `plain` run.\n\n"
         + _table(
             ["Scenario", "Plan", "Turns", "Cooperative search / plan",
