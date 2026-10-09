@@ -27,7 +27,7 @@ named by their scope, not by a predicted pull request number.
 | [DECISION-010](#decision-010) | Should an aircraft move to an intermediate hub when no route to its destination is available? | `OPEN` | — |
 | [DECISION-011](#decision-011) | Should a restricted hub add travel time on lanes with a distance? | `OPEN` | — |
 | [DECISION-012](#decision-012) | Should the movement events and `TurnFinished.movements` be derived from turn results, or replaced by them? | `OPEN` | — |
-| [DECISION-013](#decision-013) | What should `CapacitySnapshot` describe? | `OPEN` | — |
+| [DECISION-013](#decision-013) | What should `CapacitySnapshot` describe? | `DECIDED` | — |
 
 ---
 
@@ -685,8 +685,20 @@ its events in order and that `movement_tokens` of each result equals
 
 ### What should `CapacitySnapshot` describe?
 
-- **Status:** `OPEN`
-- **To be decided in:** a separate design step, after parser hardening.
+- **Status:** `DECIDED`
+- **Decided in:** [ADR-026](decisions.md#adr-026), PR #26.
+
+In short:
+
+- **Hubs:** the committed load immediately after the turn, the aircraft in
+  the hub plus the aircraft flying towards it, as departure admission
+  counts it. Start and end hubs have no capacity limit and are not
+  reported, so the end-hub question below no longer arises.
+- **Lanes:** unchanged, the usage of the lane during the turn.
+- **Readers:** `--capacity-info` is a diagnostic for checking capacity;
+  the Airlines hub report shows the same hub load.
+
+The text below is the question as it was registered.
 
 **Context.** At the end of every turn the simulator emits a
 `CapacitySnapshot` with a count and a capacity for every hub and every

@@ -24,6 +24,7 @@ from airlanes.routing.pathfinder import Pathfinder
 from airlanes.routing.policy import RoutingPolicy
 from airlanes.simulation.deadlock import resolve_deadlock
 from airlanes.simulation.departures import (
+    count_hub_load,
     plan_departures,
     select_feasible_moves,
 )
@@ -137,12 +138,11 @@ class Simulator:
         self._emit(TurnStarted(turn_number))
         self._update_weather(turn_number)
 
-        zone_occupancy = self._count_zone_occupancy()
         connection_usage = self._count_active_connection_usage()
         moved_drone_ids: set[int] = set()
 
         self._finish_in_transit_drones(
-            outcomes, movements, turn_number, zone_occupancy, moved_drone_ids
+            outcomes, movements, turn_number, moved_drone_ids
         )
         self._reconsider_routes(outcomes, turn_number, moved_drone_ids)
 
@@ -159,7 +159,6 @@ class Simulator:
             movements,
             turn_number,
             feasible_moves,
-            zone_occupancy,
             moved_drone_ids,
         )
         deadlock_reroute = resolve_deadlock(
@@ -177,9 +176,7 @@ class Simulator:
             self._emit(event)
 
         self._emit(TurnFinished(turn_number, tuple(movements)))
-        self._emit_capacity_snapshot(
-            turn_number, zone_occupancy, connection_usage
-        )
+        self._emit_capacity_snapshot(turn_number, connection_usage)
         return TurnResult(turn_number, tuple(outcomes))
 
     def _update_weather(self, turn_number: int) -> None:
@@ -291,7 +288,6 @@ class Simulator:
         outcomes: list[TurnOutcome],
         movements: list[tuple[str, str]],
         turn_number: int,
-        zone_occupancy: dict[str, int],
         moved_drone_ids: set[int],
     ) -> None:
         for drone in self.drones:
@@ -317,9 +313,6 @@ class Simulator:
             else:
                 drone.state = DroneState.WAITING
 
-            zone_occupancy[target.name] = (
-                zone_occupancy.get(target.name, 0) + 1
-            )
             outcomes.append(Arrival(drone.label, origin, target.name, lane))
             movements.append((drone.label, target.name))
             self._emit(
@@ -339,7 +332,6 @@ class Simulator:
         movements: list[tuple[str, str]],
         turn_number: int,
         planned_moves: list[tuple[Drone, Connection]],
-        zone_occupancy: dict[str, int],
         moved_drone_ids: set[int],
     ) -> None:
         """Apply moves already checked by `select_feasible_moves`."""
@@ -349,8 +341,6 @@ class Simulator:
             next_zone = drone.next_zone()
             assert next_zone is not None
 
-            current_count = zone_occupancy.get(next_zone.name, 0)
-            zone_occupancy[drone.current_zone.name] -= 1
             drone.road_km_since_air = self._road_km_after_departure(
                 drone, connection
             )
@@ -385,7 +375,6 @@ class Simulator:
                 moved_drone_ids.add(drone.drone_id)
                 continue
 
-            zone_occupancy[next_zone.name] = current_count + 1
             origin = drone.current_zone.name
             moved_to = drone.advance()
             assert moved_to is not None
@@ -425,15 +414,6 @@ class Simulator:
         if self.dispatcher is not None:
             self.dispatcher.dispatch(event)
 
-    def _count_zone_occupancy(self) -> dict[str, int]:
-        zone_occupancy: dict[str, int] = {}
-        for drone in self.drones:
-            if drone.is_delivered() or drone.state == DroneState.IN_TRANSIT:
-                continue
-            name = drone.current_zone.name
-            zone_occupancy[name] = zone_occupancy.get(name, 0) + 1
-        return zone_occupancy
-
     def _count_active_connection_usage(self) -> dict[str, int]:
         connection_usage: dict[str, int] = {}
         for drone in self.drones:
@@ -449,21 +429,23 @@ class Simulator:
         return connection_usage
 
     def _emit_capacity_snapshot(
-        self,
-        turn_number: int,
-        zone_occupancy: dict[str, int],
-        connection_usage: dict[str, int],
+        self, turn_number: int, connection_usage: dict[str, int]
     ) -> None:
+        """
+        Report capacity once the turn is complete (ADR-026). A hub's load is
+        the committed load departures are admitted against; start and end
+        hubs have no capacity limit and are left out. A lane's usage is the
+        count lane admission used during the turn.
+        """
         if self.dispatcher is None:
             return
 
-        zone_usage = tuple(
-            (
-                zone.name,
-                zone_occupancy.get(zone.name, 0),
-                zone.effective_capacity(),
-            )
+        load = count_hub_load(self.drones)
+        hub_load = tuple(
+            # A hub that is neither start nor end has its own capacity.
+            (zone.name, load.get(zone.name, 0), zone.max_drones)
             for zone in self.graph.zones.values()
+            if not zone.is_start and not zone.is_end
         )
         link_usage = tuple(
             (
@@ -473,4 +455,4 @@ class Simulator:
             )
             for connection in self.graph.connections
         )
-        self._emit(CapacitySnapshot(turn_number, zone_usage, link_usage))
+        self._emit(CapacitySnapshot(turn_number, hub_load, link_usage))

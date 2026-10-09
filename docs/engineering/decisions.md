@@ -20,7 +20,7 @@ text; the superseding ADR states what it replaces.
 | [ADR-005](#adr-005) | Bundled maps are reference scenarios with documented turn budgets | Accepted |
 | [ADR-006](#adr-006) | Known bugs are not encoded as expected behavior in tests | Accepted |
 | [ADR-007](#adr-007) | Production bugfixes are separate from test-only pull requests | Accepted |
-| [ADR-008](#adr-008) | Hub capacity counts aircraft flying towards the hub | Accepted |
+| [ADR-008](#adr-008) | Hub capacity counts aircraft flying towards the hub | Accepted; partly superseded by [ADR-026](#adr-026) |
 | [ADR-009](#adr-009) | Python 3.14 is the single supported version; CI runs the local quality gates | Accepted |
 | [ADR-010](#adr-010) | An aircraft in transit is committed to its leg | Accepted |
 | [ADR-011](#adr-011) | Routing decisions are made at hubs; replanning is triggered by events | Accepted; partly superseded by [ADR-015](#adr-015) and [ADR-020](#adr-020) |
@@ -38,6 +38,7 @@ text; the superseding ADR states what it replaces.
 | [ADR-023](#adr-023) | The simulation result keeps every completed turn; the output decides what to print | Accepted; partly superseded by [ADR-024](#adr-024) |
 | [ADR-024](#adr-024) | Turn results are typed outcomes of completed turns | Accepted |
 | [ADR-025](#adr-025) | The map format is strict: missing input takes a default, invalid input is an error | Accepted |
+| [ADR-026](#adr-026) | Hub capacity is observed as committed load | Accepted |
 
 ---
 
@@ -269,7 +270,7 @@ but not yet fixed.
 
 ### Hub capacity counts aircraft flying towards the hub
 
-- **Status:** Accepted
+- **Status:** Accepted; partly superseded by [ADR-026](#adr-026)
 - **Date:** 2026-10-03
 
 **Context.** The movement rules say an aircraft on a multi-turn leg must
@@ -1668,3 +1669,83 @@ cause, for any parsing error.
   twelve bundled maps parse to the same model as before, and the
   simulation, the command line in every text mode, and the text-output
   snapshot are unchanged.
+
+---
+
+## ADR-026
+
+### Hub capacity is observed as committed load
+
+- **Status:** Accepted
+- **Date:** 2026-10-08
+
+**Context.** Departures are admitted against a hub's committed load: the
+aircraft in it plus the aircraft already flying towards it
+([ADR-008](#adr-008)). `CapacitySnapshot` reported something else, the
+aircraft physically in the hub, as ADR-008 decided at the time. A hub whose
+slots were held by aircraft on their way showed free room. On the twelve
+bundled maps, without weather and with five weather seeds, 1,588 of 49,967
+hub values differed, and a hub with no room left looked free 689 times.
+The end hub counted only the aircraft
+delivered in the same turn, and the Airlines hub report counted the
+aircraft it drew in the hub ([DECISION-013](open-decisions.md#decision-013)).
+
+**Decision.**
+
+- **Hub load is committed load.** `CapacitySnapshot.hub_load` lists, for
+  every hub with a capacity limit, its committed load immediately after the
+  turn and its capacity. It is computed by `count_hub_load`, the function
+  departure admission uses, so the two cannot disagree. A departure that
+  happened releases its slot; an aircraft admitted towards a hub holds one
+  at once; departures that might happen later release nothing.
+- **Free room is an uncommitted arrival slot.** Capacity minus hub load is
+  the number of arrival slots nobody holds yet. It is not a promise that
+  another aircraft can depart towards the hub: a departure still needs room
+  on its lane, a lane open in the current weather, and the other admission
+  rules ([ADR-019](#adr-019),
+  [DECISION-008](open-decisions.md#decision-008)).
+- **Start and end hubs are not listed.** Their capacity is unlimited
+  ([ADR-015](#adr-015)), so a load out of a capacity says nothing about
+  room. The capacity in `hub_load` is therefore an integer.
+- **Lane usage is unchanged.** `connection_usage` is still the count that
+  lane admission uses during the turn: the aircraft on the lane at the
+  start of the turn, including those that finish their leg in it, plus the
+  turn's departures. A unit of lane capacity used in a turn is not used
+  again in the same turn.
+- **Two moments on purpose.** Hub load describes the state after the
+  turn; lane usage describes the turn. Each is the count its admission rule
+  uses.
+- **Outputs.** `--capacity-info` prints `hubs:` (committed load, or `none`
+  without intermediate hubs) and `links:` (lane usage). The Airlines hub
+  report shows the hub load of the replayed turn from its snapshot, a dash
+  before the first turn, and "not applicable" for start and end hubs. The
+  Pygame maps get no capacity numbers for lanes.
+- **The snapshot stays an observation.** It is emitted after the turn's
+  decisions and takes part in none of them. The invariant checker still
+  rebuilds the load from movement events ([ADR-004](#adr-004)); a test now
+  checks every snapshot against that rebuilt load.
+
+**Rationale.**
+
+- The question a hub's capacity answers is "how many arrival slots are
+  still free?". Aircraft already flying to the hub have taken theirs.
+- Reusing the admission rule keeps one definition of hub load. A second
+  count for display is what let the snapshot drift from admission.
+- A hub without a limit has no room to report, and leaving it out keeps
+  every consumer from filtering the same entries.
+- Lane usage during the turn is what lane admission enforces; reporting it
+  after the turn instead would hide why a departure was refused.
+
+**Consequences.**
+
+- `CapacitySnapshot.zone_usage` is renamed `hub_load`. The engine's
+  `zone_occupancy` counter, used only for the snapshot, is removed.
+- Verified against `main` on 1,872 runs: the 12 bundled maps without
+  weather and with 30 weather seeds, and 1,500 generated maps with
+  scripted weather. Turn results and every event other than the snapshot
+  are unchanged, and so are the lane values. Of 319,583 hub values, 12,630
+  change, each by exactly the number of aircraft flying to that hub; the
+  only entries that disappear are the start and end hubs. Both Pygame
+  viewers render identical frames.
+- Whether lane capacity should be drawn on the Pygame maps, for example as
+  line width, is left to the visual design of the maps.

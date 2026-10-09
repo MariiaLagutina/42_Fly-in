@@ -50,8 +50,21 @@ class TurnFinished:
 
 @dataclass(frozen=True)
 class CapacitySnapshot:
+    """
+    Capacity at the end of a completed turn (ADR-026).
+
+    `hub_load`: (hub, committed load, capacity) for every hub with a
+    capacity limit, in map order. The committed load is the aircraft in the
+    hub plus the aircraft in transit towards it, immediately after the turn
+    (ADR-008). Start and end hubs have no limit and are not listed.
+
+    `connection_usage`: (lane, used, capacity) for every lane: the aircraft
+    that used the lane during the turn, including those that finished their
+    leg in it (ADR-019).
+    """
+
     turn_number: int
-    zone_usage: tuple[tuple[str, int, int | float], ...]
+    hub_load: tuple[tuple[str, int, int], ...]
     connection_usage: tuple[tuple[str, int, int], ...]
 
 

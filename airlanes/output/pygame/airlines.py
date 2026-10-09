@@ -10,6 +10,7 @@ from airlanes.events import (
     AgentMoved,
     AgentInTransit,
     AgentRerouted,
+    CapacitySnapshot,
     SimulationEvent,
     WeatherChanged,
     TurnStarted,
@@ -135,6 +136,9 @@ class AirlinesWindow:
         # leg until it arrives.
         self.weather_reroute_pending: set[str] = set()
         self.weather_rerouted_legs: set[str] = set()
+        # Committed load and capacity of every capacity-limited hub, from
+        # the snapshot of the last replayed turn; None before turn 1.
+        self.hub_load: Optional[dict[str, tuple[int, int]]] = None
 
         if self.start_hub_name:
             for label, info in self.flight_data.items():
@@ -248,6 +252,32 @@ class AirlinesWindow:
                 self.weather_reroute_pending.discard(event.agent_label)
         elif isinstance(event, WeatherChanged):
             self.connection_weather[event.connection_name] = event.condition
+        elif isinstance(event, CapacitySnapshot):
+            self.hub_load = {
+                name: (load, capacity)
+                for name, load, capacity in event.hub_load
+            }
+
+    def _hub_report(self, zone: Zone) -> list[str]:
+        """
+        The ATC hub report for the replayed turn. The hub load is the
+        committed load from that turn's capacity snapshot (ADR-026); start
+        and end hubs have no capacity limit.
+        """
+        if zone.is_start or zone.is_end:
+            hub_load = "not applicable (unlimited capacity)"
+        elif self.hub_load is None:
+            hub_load = "— (no turn completed yet)"
+        else:
+            load, capacity = self.hub_load[zone.name]
+            hub_load = f"{load} / {capacity} aircraft"
+        return [
+            f"[ATC HUB REPORT: {zone.name.upper()}]",
+            "  -> Regional Population: "
+            f"{getattr(zone, 'population', 'N/A')}",
+            f"  -> Logistics Type:      {zone.zone_type.value.upper()}",
+            f"  -> Hub Load:            {hub_load}",
+        ]
 
     def _weather_style(
         self, condition: str
@@ -617,13 +647,6 @@ class AirlinesWindow:
                 if event.type == pygame.QUIT:
                     running = False
                 elif event.type == pygame.MOUSEBUTTONDOWN:
-                    occupancy: dict[str, int] = {}
-                    for pos_info in self.drone_positions.values():
-                        if pos_info.kind == "zone":
-                            occupancy[pos_info.first_zone] = (
-                                occupancy.get(pos_info.first_zone, 0) + 1
-                            )
-
                     click_x, click_y = event.pos
                     for zone in self.graph.zones.values():
                         distance = math.hypot(
@@ -632,27 +655,9 @@ class AirlinesWindow:
                         )
 
                         if distance <= 15:
-                            current_pop = occupancy.get(zone.name, 0)
-                            max_cap = zone.effective_capacity()
-                            max_cap_str = (
-                                "INF"
-                                if max_cap == float("inf")
-                                else str(max_cap)
-                            )
-
-                            print(f"\n[ATC HUB REPORT: {zone.name.upper()}]")
-                            print(
-                                "  -> Regional Population: "
-                                f"{getattr(zone, 'population', 'N/A')}"
-                            )
-                            print(
-                                "  -> Logistics Type:      "
-                                f"{zone.zone_type.value.upper()}"
-                            )
-                            print(
-                                "  -> Traffic Load:        "
-                                f"{current_pop} / {max_cap_str} drones"
-                            )
+                            print()
+                            for line in self._hub_report(zone):
+                                print(line)
                             break
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_SPACE:

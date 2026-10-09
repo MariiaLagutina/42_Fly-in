@@ -156,9 +156,9 @@ class CapacityInfoVisualizer:
         if not isinstance(event, CapacitySnapshot):
             return
 
-        zones = ", ".join(
-            f"{name}={used}/{self._format_capacity(capacity)}"
-            for name, used, capacity in event.zone_usage
+        hubs = ", ".join(
+            f"{name}={load}/{capacity}"
+            for name, load, capacity in event.hub_load
         )
         links = ", ".join(
             f"{name}={used}/{capacity}"
@@ -166,7 +166,7 @@ class CapacityInfoVisualizer:
         )
         self.blocks[event.turn_number] = (
             f"Turn {event.turn_number} capacity",
-            f"  zones: {zones}",
+            f"  hubs: {hubs or 'none'}",
             f"  links: {links}",
         )
 
@@ -178,8 +178,3 @@ class CapacityInfoVisualizer:
 
     def block_for(self, turn_number: int) -> tuple[str, str, str] | None:
         return self.blocks.get(turn_number)
-
-    def _format_capacity(self, capacity: int | float) -> str:
-        if capacity == float("inf"):
-            return "inf"
-        return str(capacity)
