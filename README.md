@@ -379,6 +379,10 @@ make check         # lint-strict + test
 make clean         # remove caches, coverage data, and the virtual environment
 ```
 
+`make benchmark` runs the performance benchmark by hand; it is not part of
+`make check` or CI. Method and results are in
+[docs/engineering/performance-benchmark.md](docs/engineering/performance-benchmark.md).
+
 Dependencies are declared in `pyproject.toml` and pinned in `uv.lock`. All
 `make` targets run with `--locked`, so they never modify `uv.lock`. After
 changing dependencies, run `uv lock`, review the diff, and commit both files.
