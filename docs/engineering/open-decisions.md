@@ -686,7 +686,7 @@ its events in order and that `movement_tokens` of each result equals
 ### What should `CapacitySnapshot` describe?
 
 - **Status:** `DECIDED`
-- **Decided in:** [ADR-026](decisions.md#adr-026).
+- **Decided in:** [ADR-026](decisions.md#adr-026), PR #26.
 
 In short:
 

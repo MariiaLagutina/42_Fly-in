@@ -1698,6 +1698,12 @@ aircraft it drew in the hub ([DECISION-013](open-decisions.md#decision-013)).
   departure admission uses, so the two cannot disagree. A departure that
   happened releases its slot; an aircraft admitted towards a hub holds one
   at once; departures that might happen later release nothing.
+- **Free room is an uncommitted arrival slot.** Capacity minus hub load is
+  the number of arrival slots nobody holds yet. It is not a promise that
+  another aircraft can depart towards the hub: a departure still needs room
+  on its lane, a lane open in the current weather, and the other admission
+  rules ([ADR-019](#adr-019),
+  [DECISION-008](open-decisions.md#decision-008)).
 - **Start and end hubs are not listed.** Their capacity is unlimited
   ([ADR-015](#adr-015)), so a load out of a capacity says nothing about
   room. The capacity in `hub_load` is therefore an integer.
@@ -1721,9 +1727,8 @@ aircraft it drew in the hub ([DECISION-013](open-decisions.md#decision-013)).
 
 **Rationale.**
 
-- The question a hub's capacity answers is "can another aircraft be sent
-  here now?". Aircraft already flying to the hub have the answer: their
-  slot is taken.
+- The question a hub's capacity answers is "how many arrival slots are
+  still free?". Aircraft already flying to the hub have taken theirs.
 - Reusing the admission rule keeps one definition of hub load. A second
   count for display is what let the snapshot drift from admission.
 - A hub without a limit has no room to report, and leaving it out keeps
