@@ -8,6 +8,10 @@ exceeds the timeout. Per scenario: one warm-up, then the timed repeats of
 `profile` run. Raw records go to `runs.jsonl` in the output directory,
 with the environment in `environment.json`, profiles in `profile/`, and
 the tables of `benchmarks.summarize` in `summary.md` and `summary.csv`.
+
+The run exits with status 1 if any execution times out or fails, if a
+scenario ends in a status other than its expected one, or if outcome
+fingerprints differ.
 """
 
 import argparse
@@ -52,18 +56,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     _write_json(out_dir / "environment.json", environment)
 
     started = time.perf_counter()
-    mismatches: list[str] = []
-    errors: list[str] = []
+    problems: list[str] = []
     with open(out_dir / "runs.jsonl", "w", encoding="utf-8") as runs:
         for number, scenario in enumerate(scenarios, start=1):
             records = _run_scenario(scenario, args, runs, out_dir)
-            prints = {r["fingerprint"] for r in records if "fingerprint" in r}
-            if len(prints) > 1:
-                mismatches.append(scenario.scenario_id)
-            errors += [
-                scenario.scenario_id
-                for r in records if r["status"] == "error"
-            ]
+            problems += scenario_problems(scenario, records)
             print(
                 f"[{number}/{len(scenarios)}] {_progress(scenario, records)}",
                 flush=True,
@@ -74,12 +71,38 @@ def main(argv: Sequence[str] | None = None) -> int:
     write_summary(out_dir)
     print(f"Results: {out_dir}")
     print(f"Elapsed: {environment['elapsed_s']} s")
-    if mismatches:
-        print("Fingerprints differ between executions: "
-              + ", ".join(mismatches))
-    if errors:
-        print("Executions failed: " + ", ".join(sorted(set(errors))))
-    return 1 if mismatches or errors else 0
+    for problem in problems:
+        print(f"Problem: {problem}")
+    return 1 if problems else 0
+
+
+def scenario_problems(scenario: Scenario, records: list[Record]) -> list[str]:
+    """
+    Why a scenario's executions do not count as a successful benchmark:
+    an execution that timed out or failed, a status other than the one the
+    scenario is built for, or outcome fingerprints that differ. A scenario
+    built to end in `no_route` or `deadlock` succeeds when it does.
+    """
+    name = scenario.scenario_id
+    problems = [
+        f"{name}: {r['mode']} execution {r['repeat']} ended in {r['status']}"
+        for r in records
+        if r["status"] in ("timeout", "error")
+    ]
+    unexpected = sorted({
+        r["status"]
+        for r in records
+        if r["status"] not in ("timeout", "error")
+        and r["status"] != scenario.expected
+    })
+    if unexpected:
+        problems.append(
+            f"{name}: expected {scenario.expected}, got "
+            + ", ".join(unexpected)
+        )
+    if len({r["fingerprint"] for r in records if "fingerprint" in r}) > 1:
+        problems.append(f"{name}: outcome fingerprints differ")
+    return problems
 
 
 def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:

@@ -16,7 +16,8 @@ import airlanes.simulation.engine as engine
 from airlanes.simulation.engine import Simulator
 from benchmarks import run
 from benchmarks.isolation import ExecutionTimeout, IsolatedWorker, WorkerFailed
-from benchmarks.measure import ENGINE_FUNCTIONS, MODES, Job, execute
+from benchmarks.measure import ENGINE_FUNCTIONS, MODES, Job, Record, execute
+from benchmarks.scenarios import scenario_by_id
 
 SMOKE = "smoke/tiny"
 COMMON_KEYS = {
@@ -147,3 +148,86 @@ def test_the_runner_writes_raw_records(tmp_path: Path) -> None:
     rows = (tmp_path / "summary.csv").read_text().splitlines()
     assert rows[0].startswith("scenario_id,experiment,")
     assert rows[1].startswith("smoke/tiny,smoke,ok,ok,")
+
+
+def outcome(status: str, fingerprint: str = "f1", repeat: int = 0) -> Record:
+    record: Record = {"mode": "plain", "repeat": repeat, "status": status}
+    if status not in ("timeout", "error"):
+        record["fingerprint"] = fingerprint
+    return record
+
+
+def test_a_scenario_ending_as_built_is_no_problem() -> None:
+    """Missing routes and deadlocks are successful cases when the scenario
+    is built for them."""
+    for scenario_id, status in (
+        (SMOKE, "ok"),
+        ("E5/disconnected", "no_route"),
+        ("E5/deadlock", "deadlock"),
+    ):
+        scenario = scenario_by_id(scenario_id)
+        records = [outcome(status, repeat=r) for r in (-1, 0, 1)]
+        assert run.scenario_problems(scenario, records) == []
+
+
+def test_an_unexpected_status_is_a_problem_even_when_consistent() -> None:
+    records = [outcome("deadlock", repeat=r) for r in (-1, 0, 1)]
+
+    assert run.scenario_problems(scenario_by_id(SMOKE), records) == [
+        "smoke/tiny: expected ok, got deadlock"
+    ]
+
+
+def test_an_expected_failure_that_does_not_happen_is_a_problem() -> None:
+    problems = run.scenario_problems(
+        scenario_by_id("E5/deadlock"), [outcome("ok")]
+    )
+
+    assert problems == ["E5/deadlock: expected deadlock, got ok"]
+
+
+@pytest.mark.parametrize("status", ["timeout", "error"])
+def test_a_timeout_or_error_is_a_problem(status: str) -> None:
+    records = [outcome("ok", repeat=-1), outcome(status)]
+
+    assert run.scenario_problems(scenario_by_id(SMOKE), records) == [
+        f"smoke/tiny: plain execution 0 ended in {status}"
+    ]
+
+
+def test_differing_fingerprints_are_a_problem() -> None:
+    records = [outcome("ok", "f1"), outcome("ok", "f2", repeat=1)]
+
+    assert run.scenario_problems(scenario_by_id(SMOKE), records) == [
+        "smoke/tiny: outcome fingerprints differ"
+    ]
+
+
+def test_the_runner_fails_when_an_execution_times_out(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """No execution can start a process and answer within a millisecond:
+    the first one times out, the scenario stops, and the run fails."""
+    status = run.main([
+        "--scenario", SMOKE, "--timeout", "0.001", "--out", str(tmp_path),
+    ])
+
+    assert status == 1
+    records = [
+        json.loads(line)
+        for line in (tmp_path / "runs.jsonl").read_text().splitlines()
+    ]
+    assert [(r["mode"], r["status"]) for r in records] == [
+        ("plain", "timeout")
+    ]
+    assert "Problem: smoke/tiny: plain execution -1 ended in timeout" in (
+        capsys.readouterr().out
+    )
+
+
+def test_the_runner_accepts_an_expected_deadlock(tmp_path: Path) -> None:
+    status = run.main([
+        "--scenario", "E5/deadlock", "--repeats", "1", "--out", str(tmp_path),
+    ])
+
+    assert status == 0

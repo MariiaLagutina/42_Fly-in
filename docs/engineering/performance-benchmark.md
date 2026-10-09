@@ -49,6 +49,12 @@ regenerated from the same raw records after `f507ef8`, which only changes
 how the phase table is presented. The full matrix took **1450 s (24 min
 10 s)** of wall-clock time.
 
+The run exits with status 1 when any execution times out or fails, when
+a scenario ends in a status other than the one it is built for, or when
+outcome fingerprints differ; each problem is printed. A scenario built to
+end in `no_route` or `deadlock` succeeds when it does. Applied to the raw
+records of the run below, these checks find no problem.
+
 Raw records stay local, in the ignored `benchmarks/results/<UTC time>-<commit>/`:
 `environment.json`, `runs.jsonl` (one line per execution), `profile/*.txt`,
 `summary.md` and `summary.csv`. The benchmark is never part of `make
