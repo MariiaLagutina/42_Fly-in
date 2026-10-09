@@ -17,7 +17,7 @@ define mypy_all
 endef
 
 .PHONY: install hooks run run-pygame run-pygame-airlines debug check-sources \
-	lint lint-strict test coverage check clean
+	lint lint-strict test coverage check benchmark clean
 
 install:
 	uv sync --locked
@@ -60,6 +60,11 @@ coverage:
 	uv run --locked pytest --cov --cov-report=term-missing
 
 check: lint-strict test
+
+# The performance benchmark, run by hand and never part of `check`; options
+# go in ARGS, e.g. make benchmark ARGS="--experiment E2".
+benchmark:
+	uv run --locked python -m benchmarks.run $(ARGS)
 
 clean:
 	find . -type d -name __pycache__ -exec rm -rf {} +
