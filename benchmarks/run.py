@@ -6,7 +6,8 @@ Every scenario runs in its own process, which is killed when an execution
 exceeds the timeout. Per scenario: one warm-up, then the timed repeats of
 `plain` and `phases`, one `events` run and, for selected scenarios, one
 `profile` run. Raw records go to `runs.jsonl` in the output directory,
-with the environment in `environment.json` and profiles in `profile/`.
+with the environment in `environment.json`, profiles in `profile/`, and
+the tables of `benchmarks.summarize` in `summary.md` and `summary.csv`.
 """
 
 import argparse
@@ -25,6 +26,7 @@ from typing import Any, TextIO
 from benchmarks.isolation import ExecutionTimeout, IsolatedWorker, WorkerFailed
 from benchmarks.measure import MODES, Job, Record, execute
 from benchmarks.scenarios import REPO_ROOT, Scenario, all_scenarios
+from benchmarks.summarize import write_summary
 
 RESULTS_DIR = REPO_ROOT / "benchmarks" / "results"
 TIMEOUT_S = 120.0
@@ -69,6 +71,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     environment["elapsed_s"] = round(time.perf_counter() - started, 1)
     _write_json(out_dir / "environment.json", environment)
+    write_summary(out_dir)
     print(f"Results: {out_dir}")
     print(f"Elapsed: {environment['elapsed_s']} s")
     if mismatches:

@@ -142,3 +142,8 @@ def test_the_runner_writes_raw_records(tmp_path: Path) -> None:
     ]
     assert all("profile_text" not in r for r in records)
     assert (tmp_path / "profile" / "smoke_tiny.txt").exists()
+    summary = (tmp_path / "summary.md").read_text()
+    assert "Scenarios whose outcome fingerprints differ: none." in summary
+    rows = (tmp_path / "summary.csv").read_text().splitlines()
+    assert rows[0].startswith("scenario_id,experiment,")
+    assert rows[1].startswith("smoke/tiny,smoke,ok,ok,")
