@@ -28,7 +28,7 @@ addopts = ["-ra", "--strict-markers", "--strict-config"]
 
 [tool.coverage.run]
 source = ["."]
-omit = ["tests/*", ".venv/*"]
+omit = ["tests/*", ".venv/*", "benchmarks/*"]
 branch = true
 patch = ["subprocess"]
 
