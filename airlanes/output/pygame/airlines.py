@@ -160,6 +160,9 @@ class AirlinesWindow:
         self.current_turn = 0
         self.drone_positions: dict[str, DroneDisplayPosition] = {}
         self.connection_weather: dict[str, str] = {}
+        # Whether each lane accepts new departures, as the simulator
+        # reported with its last weather change. Every lane starts open.
+        self.connection_open: dict[str, bool] = {}
         # A weather reroute happens at a hub, before the aircraft departs
         # on the new route. The aircraft stays pending until its next
         # departure; a multi-turn departure then becomes a weather-rerouted
@@ -280,6 +283,7 @@ class AirlinesWindow:
                 self.weather_reroute_pending.discard(event.agent_label)
         elif isinstance(event, WeatherChanged):
             self.connection_weather[event.connection_name] = event.condition
+            self.connection_open[event.connection_name] = event.is_open
         elif isinstance(event, CapacitySnapshot):
             self.hub_load = {
                 name: (load, capacity)
@@ -335,8 +339,9 @@ class AirlinesWindow:
         """
         One stroke per connection, between the hub centres. Width and
         colour depth show the lane's capacity; the colour family shows its
-        weather. Lanes between the same two hubs are spread symmetrically
-        around the line between them.
+        weather; a lane the simulator reported closed is dashed. Lanes
+        between the same two hubs are spread symmetrically around the line
+        between them.
         """
         pairs: dict[tuple[str, str], list[Connection]] = {}
         for connection in self.graph.connections:
@@ -368,6 +373,9 @@ class AirlinesWindow:
                         end,
                         lane_color(condition, capacity),
                         lane_width(capacity),
+                        closed=not self.connection_open.get(
+                            connection.name(), True
+                        ),
                     )
                 )
         return strokes

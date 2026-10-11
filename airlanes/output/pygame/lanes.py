@@ -3,12 +3,12 @@ Lane styling of the geographic dispatch-center view (Airlines). The
 standard turn viewer keeps its own lane drawing.
 
 A lane's width and the depth of its colour show its capacity; the colour
-family shows its weather. Widths stop at 5 px, so the 7+ capacity class
-differs from 4-6 by a deeper shade only.
+family shows its weather; a dashed lane is closed. Widths stop at 5 px, so
+the 7+ capacity class differs from 4-6 by a deeper shade only.
 """
 from dataclasses import dataclass
 import math
-from typing import Sequence
+from typing import Iterator, Sequence
 
 import pygame
 
@@ -39,6 +39,10 @@ WEATHER_SHADES: dict[str, tuple[RGB, RGB, RGB, RGB]] = {
 # visible against similar country colours.
 OUTLINE_COLOR: RGB = (18, 24, 34)
 OUTLINE_WIDTH = 1
+
+# A closed lane is dashed: weather has closed it to new departures.
+DASH_LENGTH = 10
+DASH_GAP = 7
 
 # Distance between the centre lines of parallel lanes.
 PARALLEL_SPACING = 7
@@ -73,6 +77,7 @@ class LaneStroke:
     end: FloatPoint
     color: RGB
     width: int
+    closed: bool = False
 
 
 def parallel_offsets(count: int) -> list[float]:
@@ -99,6 +104,32 @@ def offset_line(
     return (start[0] + nx, start[1] + ny), (end[0] + nx, end[1] + ny)
 
 
+def dash_segments(
+    start: FloatPoint, end: FloatPoint
+) -> Iterator[tuple[FloatPoint, FloatPoint]]:
+    """The dashes of a closed lane, from `start` towards `end`."""
+    dx = end[0] - start[0]
+    dy = end[1] - start[1]
+    length = math.hypot(dx, dy)
+    position = 0.0
+    while position < length:
+        stop = min(length, position + DASH_LENGTH)
+        yield (
+            (start[0] + dx * position / length,
+             start[1] + dy * position / length),
+            (start[0] + dx * stop / length, start[1] + dy * stop / length),
+        )
+        position += DASH_LENGTH + DASH_GAP
+
+
+def _segments(
+    stroke: LaneStroke,
+) -> list[tuple[FloatPoint, FloatPoint]]:
+    if stroke.closed:
+        return list(dash_segments(stroke.start, stroke.end))
+    return [(stroke.start, stroke.end)]
+
+
 def draw_lanes(
     surface: pygame.surface.Surface, strokes: Sequence[LaneStroke]
 ) -> None:
@@ -108,12 +139,13 @@ def draw_lanes(
     never cut across a lane at a crossing.
     """
     ordered = sorted(strokes, key=lambda stroke: -stroke.width)
-    for stroke in ordered:
-        pygame.draw.line(
-            surface, OUTLINE_COLOR, stroke.start, stroke.end,
-            stroke.width + 2 * OUTLINE_WIDTH,
-        )
-    for stroke in ordered:
-        pygame.draw.line(
-            surface, stroke.color, stroke.start, stroke.end, stroke.width
-        )
+    pieces = [(stroke, _segments(stroke)) for stroke in ordered]
+    for stroke, segments in pieces:
+        for start, end in segments:
+            pygame.draw.line(
+                surface, OUTLINE_COLOR, start, end,
+                stroke.width + 2 * OUTLINE_WIDTH,
+            )
+    for stroke, segments in pieces:
+        for start, end in segments:
+            pygame.draw.line(surface, stroke.color, start, end, stroke.width)

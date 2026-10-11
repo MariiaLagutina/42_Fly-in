@@ -1,5 +1,6 @@
 """Lane styling of the geographic dispatch-center view: capacity widths and
-shades, draw order and outlines, and lane geometry. Runs headless."""
+shades, draw order and outlines, lane geometry, and dashed closed lanes.
+Runs headless."""
 
 import math
 from typing import Any
@@ -9,6 +10,7 @@ import pytest
 
 from airlanes.events import EventDispatcher
 from airlanes.model.connection import Connection
+from airlanes.model.transport_mode import TransportMode
 from airlanes.model.zone import Zone
 from airlanes.output.pygame.airlines import (
     AirlinesWindow,
@@ -18,6 +20,7 @@ from airlanes.output.pygame.lanes import (
     OUTLINE_COLOR,
     WEATHER_SHADES,
     LaneStroke,
+    dash_segments,
     draw_lanes,
     lane_color,
     lane_width,
@@ -27,7 +30,7 @@ from airlanes.output.pygame.lanes import (
 from airlanes.simulation.engine import Simulator
 from airlanes.world.weather import ScriptedWeather, WeatherCondition
 
-from tests.support.graphs import build_graph
+from tests.support.graphs import Link, build_graph
 
 
 def luminance(color: tuple[int, int, int]) -> float:
@@ -250,3 +253,85 @@ def test_parallel_connections_are_drawn_apart(
     for lane in (first, second):
         assert lane.start[1] == lane.end[1]
         assert math.dist(lane.start, lane.end) == pytest.approx(200)
+
+
+def test_dashes_follow_the_lane_with_regular_gaps() -> None:
+    segments = list(dash_segments((0.0, 0.0), (40.0, 0.0)))
+
+    assert segments == [
+        ((0.0, 0.0), (10.0, 0.0)),
+        ((17.0, 0.0), (27.0, 0.0)),
+        ((34.0, 0.0), (40.0, 0.0)),
+    ]
+
+
+def test_a_closed_lane_is_drawn_as_outlined_dashes(
+    drawn: LineRecorder,
+) -> None:
+    closed = LaneStroke((0.0, 5.0), (40.0, 5.0), (9, 9, 9), 3, closed=True)
+
+    draw_lanes(pygame.Surface((1, 1)), [closed])
+
+    outlines = [c for c in drawn.calls if c[0] == OUTLINE_COLOR]
+    dashes = [c for c in drawn.calls if c[0] == (9, 9, 9)]
+    assert len(outlines) == len(dashes) == 3
+    assert [(start, end) for _, start, end, _ in dashes] == [
+        ((0.0, 5.0), (10.0, 5.0)),
+        ((17.0, 5.0), (27.0, 5.0)),
+        ((34.0, 5.0), (40.0, 5.0)),
+    ]
+    assert {width for _, _, _, width in outlines} == {5}
+
+
+def closure_by_turn(
+    monkeypatch: pytest.MonkeyPatch, mode: TransportMode
+) -> list[bool]:
+    """Whether the start-mid lane is drawn dashed, from the initial state
+    through each replayed turn. Storm from turn 2, clear again on turn 4."""
+    monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
+    graph = build_graph(
+        [
+            Zone("start", 100, 100, is_start=True),
+            Zone("mid", 300, 100),
+            Zone("goal", 300, 400, is_end=True),
+        ],
+        [
+            Link("start", "mid", distance=100, mode=mode),
+            Link("mid", "goal", distance=100),
+        ],
+    )
+    viewer = PygameAirlinesVisualizer(graph)
+    dispatcher = EventDispatcher()
+    dispatcher.add_listener(viewer)
+    weather = ScriptedWeather(
+        {
+            2: {"start-mid": WeatherCondition.STORM},
+            4: {"start-mid": WeatherCondition.CLEAR},
+        }
+    )
+    # Four aircraft through single-capacity hubs keep the run going past
+    # turn 4.
+    Simulator(graph, 4, dispatcher, weather=weather).run()
+    window = AirlinesWindow(viewer)
+    try:
+        dashed = []
+        for turn in range(min(6, len(window.turn_indices))):
+            window._goto_turn(turn)
+            dashed.append(window._lane_strokes()[0].closed)
+    finally:
+        pygame.quit()
+    return dashed
+
+
+def test_an_air_lane_is_dashed_while_the_simulator_reports_it_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert closure_by_turn(monkeypatch, TransportMode.AIR) == [
+        False, False, True, True, False, False,
+    ]
+
+
+def test_a_road_lane_stays_solid_in_a_storm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert closure_by_turn(monkeypatch, TransportMode.ROAD) == [False] * 6
