@@ -1,6 +1,6 @@
 # Engineering Decisions
 
-A lightweight decision log (ADR style) for Maria's Airlanes. It records
+A lightweight decision log (ADR style) for Mariia's Airlanes. It records
 decisions the project has already made and still follows, so a new contributor
 can see why the code and tests look the way they do.
 
@@ -783,7 +783,7 @@ execution.
 - **Status:** Accepted
 - **Date:** 2026-10-04
 
-**Context.** Maria's Airlanes is primarily an air-routing system. With roads
+**Context.** Mariia's Airlanes is primarily an air-routing system. With roads
 open in any weather ([ADR-016](#adr-016)), routing could turn a flight into
 an arbitrarily long drive. Germany already has a chain of six road lanes,
 745 km long.

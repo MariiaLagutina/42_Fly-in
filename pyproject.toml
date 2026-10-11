@@ -1,5 +1,5 @@
 [project]
-name = "marias-airlanes"
+name = "mariias-airlanes"
 version = "0.1.0"
 description = "Turn-based air-traffic simulation with capacity-aware routing, weather, and a Pygame dispatch center."
 readme = "README.md"

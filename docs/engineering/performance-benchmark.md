@@ -1,6 +1,6 @@
 # Performance Benchmark
 
-How long Maria's Airlanes takes to parse a map, plan the initial routes and
+How long Mariia's Airlanes takes to parse a map, plan the initial routes and
 run the simulation, how that grows with the map and the traffic, and where
 the time goes. This is Stage 8A. It measures and changes nothing under
 `airlanes/`; whether an optimization is justified is decided from these

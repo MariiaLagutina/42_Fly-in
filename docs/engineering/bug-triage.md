@@ -1,6 +1,6 @@
 # Bug Triage
 
-Registry of confirmed defects in Maria's Airlanes. Each entry keeps a stable ID,
+Registry of confirmed defects in Mariia's Airlanes. Each entry keeps a stable ID,
 so issues, commits, and pull requests can refer to it.
 
 Questions where the correct behavior is not decided yet live in

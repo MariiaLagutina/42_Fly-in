@@ -124,7 +124,9 @@ def main() -> int:
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Drone routing simulator")
+    parser = argparse.ArgumentParser(
+        description="Mariia's Airlanes: turn-based air-traffic simulation"
+    )
     parser.add_argument("map_file", help="Path to the map file")
     parser.add_argument(
         "--visual",
