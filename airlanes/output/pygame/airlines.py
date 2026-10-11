@@ -78,7 +78,7 @@ class AirlinesWindow:
     def _setup_pygame(self) -> None:
         pygame.init()
         self.screen = pygame.display.set_mode((self.width, self.height))
-        pygame.display.set_caption("Fly-in: Global Logistics")
+        pygame.display.set_caption("Mariia's Airlanes — Dispatch Center")
         self.clock = pygame.time.Clock()
 
         self.city_font = pygame.font.SysFont("Arial", 16, bold=True)

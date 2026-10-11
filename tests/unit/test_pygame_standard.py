@@ -1,4 +1,5 @@
-"""Standard Pygame viewer: the caption of a turn without movement (BUG-010).
+"""Standard Pygame viewer: the window title, and the caption of a turn
+without movement (BUG-010).
 
 Runs headless with SDL's dummy video driver and records the text the
 history bar renders.
@@ -56,6 +57,25 @@ def test_only_the_frame_before_the_first_turn_is_the_initial_state(
         pygame.quit()
 
     assert captions == [
-        (0, ["Initial state (all drones at base)"]),
+        (0, ["Initial state (all aircraft at the start hub)"]),
         (2, ["No departures or arrivals this turn"]),
     ]
+
+
+def test_the_window_is_titled_after_the_project(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
+    graph = build_graph([start_hub(), end_hub()], [Link("start", "goal")])
+    viewer = PygameStandardVisualizer(graph, 1)
+    dispatcher = EventDispatcher()
+    dispatcher.add_listener(viewer)
+    Simulator(graph, 1, dispatcher).run()
+
+    DroneSimulationWindow(viewer)
+    try:
+        title, _icon_title = pygame.display.get_caption()
+    finally:
+        pygame.quit()
+
+    assert title == "Mariia's Airlanes — Turn Viewer"

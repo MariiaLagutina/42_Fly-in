@@ -88,7 +88,7 @@ class DroneSimulationWindow:
         self.graph = visualizer.graph
 
         self.screen = pygame.display.set_mode((width, height))
-        pygame.display.set_caption("Fly-in UI")
+        pygame.display.set_caption("Mariia's Airlanes — Turn Viewer")
 
         self.autoplay = True
         self.drone_sprite = load_sprite("drone.png", (30, 30), UIColors.WHITE)
@@ -224,7 +224,7 @@ class DroneSimulationWindow:
             # Only frame 0 is the state before the first turn; a later turn
             # can complete without a departure or an arrival (BUG-010).
             caption = (
-                "Initial state (all drones at base)"
+                "Initial state (all aircraft at the start hub)"
                 if frame.turn_number == 0
                 else "No departures or arrivals this turn"
             )
@@ -243,7 +243,7 @@ class DroneSimulationWindow:
 
         for drone_label, destination in frame.movements:
             short_dest = self._get_short_name(destination)
-            move_str = f"{drone_label}→{short_dest}"
+            move_str = f"{drone_label}->{short_dest}"
             element_surface = self.text_font.render(
                 move_str, True, UIColors.TEXT_LIGHT
             )

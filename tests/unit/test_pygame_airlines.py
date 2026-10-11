@@ -1,5 +1,5 @@
-"""Airlines Pygame viewer: flight statuses on the dispatch board (BUG-011,
-BUG-012) and the ATC hub report (ADR-026).
+"""Airlines Pygame viewer: the window title, flight statuses on the dispatch
+board (BUG-011, BUG-012) and the ATC hub report (ADR-026).
 
 Runs headless with SDL's dummy video driver. The board tests record the
 badges the live-departures panel renders after each replayed turn.
@@ -242,3 +242,15 @@ def test_hub_report_of_start_and_end_hubs_has_no_capacity(
         ]
     finally:
         pygame.quit()
+
+
+def test_the_window_is_titled_after_the_project(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    airlines_window(monkeypatch, [Link("start", "b"), Link("b", "goal")], 1)
+    try:
+        title, _icon_title = pygame.display.get_caption()
+    finally:
+        pygame.quit()
+
+    assert title == "Mariia's Airlanes — Dispatch Center"
