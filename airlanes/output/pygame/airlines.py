@@ -30,6 +30,14 @@ from airlanes.output.pygame.common import (
     IMG_DIR,
     Point,
 )
+from airlanes.output.pygame.lanes import (
+    LaneStroke,
+    draw_lanes,
+    lane_color,
+    lane_width,
+    offset_line,
+    parallel_offsets,
+)
 
 
 # Background image of each bundled geographic map, by map file name. Hub
@@ -299,18 +307,18 @@ class AirlinesWindow:
             f"  -> Hub Load:            {hub_load}",
         ]
 
-    def _weather_style(
-        self, condition: str
-    ) -> tuple[tuple[int, int, int], int]:
+    def _weather_alert_color(self, condition: str) -> tuple[int, int, int]:
+        """Text colour of a weather alert, in the condition's lane colour
+        family."""
         if condition == "storm":
-            return UIColors.RED, 4
+            return UIColors.RED
         if condition == "snow":
-            return UIColors.HIGHLIGHT, 4
+            return UIColors.HIGHLIGHT
         if condition == "rain":
-            return UIColors.BLUE, 4
+            return UIColors.BLUE
         if condition == "tailwind":
-            return UIColors.GREEN, 4
-        return UIColors.TEXT_MUTED, 3
+            return UIColors.GREEN
+        return UIColors.TEXT_MUTED
 
     def _draw_weather_icon(
         self, connection: Connection, condition: str
@@ -323,13 +331,51 @@ class AirlinesWindow:
             icon_rect = self.icons[condition].get_rect(center=(mid_x, mid_y))
             self.screen.blit(self.icons[condition], icon_rect)
 
-    def _draw_weather_connections(self) -> None:
+    def _lane_strokes(self) -> list[LaneStroke]:
+        """
+        One stroke per connection, between the hub centres. Width and
+        colour depth show the lane's capacity; the colour family shows its
+        weather. Lanes between the same two hubs are spread symmetrically
+        around the line between them.
+        """
+        pairs: dict[tuple[str, str], list[Connection]] = {}
         for connection in self.graph.connections:
-            start = (connection.zone_a.x, connection.zone_a.y)
-            end = (connection.zone_b.x, connection.zone_b.y)
+            pair = (connection.zone_a, connection.zone_b)
+            # Measure offsets from one fixed end of the pair, so lanes
+            # listed in either direction still spread apart.
+            first, second = sorted(pair, key=lambda zone: zone.name)
+            pairs.setdefault((first.name, second.name), []).append(
+                connection
+            )
+
+        strokes = []
+        for (first_name, second_name), lanes in pairs.items():
+            first = self.graph.zones[first_name]
+            second = self.graph.zones[second_name]
+            for connection, offset in zip(
+                lanes, parallel_offsets(len(lanes))
+            ):
+                start, end = offset_line(
+                    (first.x, first.y), (second.x, second.y), offset
+                )
+                condition = self.connection_weather.get(
+                    connection.name(), "clear"
+                )
+                capacity = connection.max_link_capacity
+                strokes.append(
+                    LaneStroke(
+                        start,
+                        end,
+                        lane_color(condition, capacity),
+                        lane_width(capacity),
+                    )
+                )
+        return strokes
+
+    def _draw_weather_connections(self) -> None:
+        draw_lanes(self.screen, self._lane_strokes())
+        for connection in self.graph.connections:
             condition = self.connection_weather.get(connection.name(), "clear")
-            color, thickness = self._weather_style(condition)
-            pygame.draw.line(self.screen, color, start, end, thickness)
             self._draw_weather_icon(connection, condition)
 
     def _draw_city_name(self, zone: Zone) -> None:
@@ -539,7 +585,7 @@ class AirlinesWindow:
 
         for conn_name, cond in self.connection_weather.items():
             if cond != "clear":
-                w_color, _ = self._weather_style(cond)
+                w_color = self._weather_alert_color(cond)
                 c_text = self.dashboard_font.render(
                     f"{conn_name}: {cond.upper()}", True, w_color
                 )
