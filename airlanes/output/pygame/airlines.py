@@ -1,4 +1,5 @@
 import math
+from pathlib import Path
 import random
 import string
 import sys
@@ -31,6 +32,20 @@ from airlanes.output.pygame.common import (
 )
 
 
+# Background image of each bundled geographic map, by map file name. Hub
+# coordinates of these maps are drawn on their image; any other map gets the
+# plain dispatch-center background.
+MAP_BACKGROUNDS = {
+    "europa_map.txt": "europa.png",
+    "germany_map.txt": "germany.png",
+}
+
+
+def background_for(map_path: str | Path) -> Optional[str]:
+    """The background image for a map file, or None for a plain one."""
+    return MAP_BACKGROUNDS.get(Path(map_path).name)
+
+
 class FlightInfo(TypedDict):
     flight: str
     origin: str
@@ -55,9 +70,16 @@ class AirlinesWindow:
     COLOR_OVERLAY_BORDER = (80, 95, 115)
     COLOR_MUTED_DARK = (100, 110, 120)
 
-    def __init__(self, visualizer: PygameAirlinesVisualizer) -> None:
+    def __init__(
+        self,
+        visualizer: PygameAirlinesVisualizer,
+        background: Optional[str] = None,
+    ) -> None:
+        """`background` names an image in the asset directory; None draws
+        the plain dispatch-center background."""
         self.visualizer = visualizer
         self.graph = visualizer.graph
+        self.background = background
 
         self._setup_layout()
         self._setup_pygame()
@@ -175,12 +197,10 @@ class AirlinesWindow:
         return f"{population//1000}K"
 
     def _load_background(self) -> Optional[pygame.surface.Surface]:
-        bg_image_name = "germany.png"
-        for arg in sys.argv:
-            if "europa" in arg.lower():
-                bg_image_name = "europa.png"
+        if self.background is None:
+            return None
         try:
-            bg = pygame.image.load(IMG_DIR / bg_image_name)
+            bg = pygame.image.load(IMG_DIR / self.background)
             return pygame.transform.scale(bg, (self.map_width, self.height))
         except FileNotFoundError:
             return None
@@ -699,6 +719,8 @@ class AirlinesWindow:
         sys.exit()
 
 
-def run_pygame_airlines(visualizer: PygameAirlinesVisualizer) -> None:
-    window = AirlinesWindow(visualizer)
+def run_pygame_airlines(
+    visualizer: PygameAirlinesVisualizer, background: Optional[str] = None
+) -> None:
+    window = AirlinesWindow(visualizer, background)
     window.run_loop()

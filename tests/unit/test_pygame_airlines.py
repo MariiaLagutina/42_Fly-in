@@ -1,18 +1,26 @@
-"""Airlines Pygame viewer: the window title, flight statuses on the dispatch
-board (BUG-011, BUG-012) and the ATC hub report (ADR-026).
+"""Airlines Pygame viewer: the window title, the map background, flight
+statuses on the dispatch board (BUG-011, BUG-012) and the ATC hub report
+(ADR-026).
 
 Runs headless with SDL's dummy video driver. The board tests record the
 badges the live-departures panel renders after each replayed turn.
 """
 
+from pathlib import Path
+import sys
+from typing import Optional
+
 import pygame
 import pytest
 
+from airlanes import cli
 from airlanes.events import CapacitySnapshot, EventDispatcher
 from airlanes.model.transport_mode import TransportMode
+from airlanes.output.pygame import airlines
 from airlanes.output.pygame.airlines import (
     AirlinesWindow,
     PygameAirlinesVisualizer,
+    background_for,
 )
 from airlanes.simulation.engine import Simulator
 from airlanes.world.weather import ScriptedWeather, WeatherCondition
@@ -254,3 +262,73 @@ def test_the_window_is_titled_after_the_project(
         pygame.quit()
 
     assert title == "Mariia's Airlanes — Dispatch Center"
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.mark.parametrize(
+    ("map_path", "background"),
+    [
+        pytest.param("maps/bonus/europa_map.txt", "europa.png", id="europe"),
+        pytest.param(
+            "/elsewhere/germany_map.txt", "germany.png", id="germany"
+        ),
+        pytest.param(
+            "maps/challenger/01_the_impossible_dream.txt", None, id="other"
+        ),
+        pytest.param("maps/europa_notes/map.txt", None, id="name-only"),
+    ],
+)
+def test_the_background_is_chosen_by_map_file_name(
+    map_path: str, background: Optional[str]
+) -> None:
+    assert background_for(map_path) == background
+
+
+def test_the_background_does_not_depend_on_the_command_line(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The window used to pick Europe when "europa" appeared in sys.argv
+    # and Germany for every other map.
+    monkeypatch.setattr(sys, "argv", ["main.py", "europa_map.txt"])
+    window, _ = airlines_window(
+        monkeypatch, [Link("start", "b"), Link("b", "goal")], 1
+    )
+    pygame.quit()
+
+    assert window.background is None
+    assert window.bg_image is None
+
+
+def test_a_named_background_fills_the_map_area(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SDL_VIDEODRIVER", "dummy")
+    graph = build_graph([start_hub(), end_hub()], [Link("start", "goal")])
+    window = AirlinesWindow(PygameAirlinesVisualizer(graph), "germany.png")
+    pygame.quit()
+
+    assert window.bg_image is not None
+    assert window.bg_image.get_size() == (window.map_width, window.height)
+
+
+def test_the_cli_passes_the_background_of_the_map(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    opened: list[Optional[str]] = []
+
+    def record(
+        visualizer: PygameAirlinesVisualizer,
+        background: Optional[str] = None,
+    ) -> None:
+        opened.append(background)
+
+    monkeypatch.setattr(airlines, "run_pygame_airlines", record)
+    map_file = REPO_ROOT / "maps" / "bonus" / "germany_map.txt"
+    monkeypatch.setattr(
+        sys, "argv", ["main.py", str(map_file), "--pygame-airlines"]
+    )
+
+    assert cli.main() == cli.EXIT_OK
+    assert opened == ["germany.png"]

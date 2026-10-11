@@ -94,9 +94,14 @@ def main() -> int:
         return EXIT_OK
 
     if airlines_pygame_visualizer is not None:
-        from airlanes.output.pygame.airlines import run_pygame_airlines
+        from airlanes.output.pygame.airlines import (
+            background_for,
+            run_pygame_airlines,
+        )
 
-        run_pygame_airlines(airlines_pygame_visualizer)
+        run_pygame_airlines(
+            airlines_pygame_visualizer, background_for(args.map_file)
+        )
         return EXIT_OK
 
     if airlines_visualizer is not None:
