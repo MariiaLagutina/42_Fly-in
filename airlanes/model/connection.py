@@ -16,9 +16,20 @@ class Connection:
 
     Its endpoints are fixed once it is created: the graph indexes its lanes
     by hub (ADR-027), so reassigning or deleting `zone_a` or `zone_b`
-    raises `AttributeError`. Reading them is an ordinary attribute access.
-    Capacity, mode and distance can still be set after creation.
+    raises `AttributeError`. Capacity, mode and distance can still be set
+    after creation. Attributes live in slots, so a connection has no
+    `__dict__` and takes no attributes beyond these five; reading them
+    stays a plain slot access, which a guard on a `__dict__` would slow
+    down (ADR-027).
     """
+
+    __slots__ = ("zone_a", "zone_b", "max_link_capacity", "mode", "distance")
+
+    zone_a: "Zone"
+    zone_b: "Zone"
+    max_link_capacity: int
+    mode: TransportMode
+    distance: int
 
     def __init__(
         self,
@@ -28,25 +39,26 @@ class Connection:
         mode: TransportMode = TransportMode.AIR,
     ) -> None:
         """Initialize connection configuration and state."""
-        self.zone_a = zone_a
-        self.zone_b = zone_b
-        self.max_link_capacity = max_link_capacity
-        self.mode = mode
-        self.distance: int = 0
+        # Set directly, past the endpoint guard of `__setattr__`.
+        object.__setattr__(self, "zone_a", zone_a)
+        object.__setattr__(self, "zone_b", zone_b)
+        object.__setattr__(self, "max_link_capacity", max_link_capacity)
+        object.__setattr__(self, "mode", mode)
+        object.__setattr__(self, "distance", 0)
 
     def __setattr__(self, name: str, value: object) -> None:
-        if name in _ENDPOINTS and name in self.__dict__:
+        if name in _ENDPOINTS and hasattr(self, name):
             raise AttributeError(
                 f"A connection's {name} cannot change after it is created."
             )
-        super().__setattr__(name, value)
+        object.__setattr__(self, name, value)
 
     def __delattr__(self, name: str) -> None:
         if name in _ENDPOINTS:
             raise AttributeError(
                 f"A connection's {name} cannot be deleted."
             )
-        super().__delattr__(name)
+        object.__delattr__(self, name)
 
     def connects(self, zone: "Zone") -> bool:
         """Check if the connection connects to the given zone."""
