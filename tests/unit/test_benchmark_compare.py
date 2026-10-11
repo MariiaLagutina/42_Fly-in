@@ -83,7 +83,7 @@ def test_a_changed_fingerprint_is_a_problem(
     rows = records(after)
     for row in rows:
         if "fingerprint" in row:
-            row["fingerprint"] = "changed"
+            row["fingerprint"] = "0" * 64
     rewrite(after, rows)
 
     assert compare.compare(smoke_run, after, partial=True) == [
@@ -118,10 +118,130 @@ def test_missing_data_is_a_problem(smoke_run: Path, tmp_path: Path) -> None:
 
     problems = compare.compare(smoke_run, after, partial=True)
 
-    assert f"after: {SMOKE} has 2 plain repeats, needs 3" in problems
-    assert f"after: {SMOKE} plain repeat 2 lacks plan_ns" in problems
+    assert f"after: {SMOKE} has 1 complete plain repeats, needs 3" in (
+        problems
+    )
+    assert f"after: {SMOKE} plain execution 2 lacks plan_ns" in problems
     assert f"after: {SMOKE} has no phases execution" in problems
     assert f"after: {SMOKE} has no profile execution" in problems
+
+
+def drop_fingerprints(out_dir: Path) -> None:
+    rows = records(out_dir)
+    for row in rows:
+        row.pop("fingerprint", None)
+    rewrite(out_dir, rows)
+
+
+def test_missing_fingerprints_in_one_run_are_a_problem(
+    smoke_run: Path, tmp_path: Path
+) -> None:
+    after = copy_run(smoke_run, tmp_path / "after")
+    drop_fingerprints(after)
+
+    problems = compare.compare(smoke_run, after, partial=True)
+
+    for mode, repeat in (("plain", -1), ("plain", 0), ("phases", 0),
+                         ("events", 0), ("profile", 0)):
+        assert (
+            f"after: {SMOKE} {mode} execution {repeat} lacks a valid "
+            "fingerprint"
+        ) in problems
+    assert not any(p.startswith("before:") for p in problems)
+
+
+def test_fingerprints_missing_from_both_runs_are_a_problem(
+    tmp_path: Path, smoke_run: Path
+) -> None:
+    """Two runs without fingerprints agree on nothing."""
+    before = copy_run(smoke_run, tmp_path / "before")
+    after = copy_run(smoke_run, tmp_path / "after")
+    drop_fingerprints(before)
+    drop_fingerprints(after)
+
+    problems = compare.compare(before, after, partial=True)
+
+    assert f"{SMOKE}: no fingerprint to compare" in problems
+    assert f"before: {SMOKE} events execution 0 lacks a valid fingerprint" in (
+        problems
+    )
+    assert f"after: {SMOKE} events execution 0 lacks a valid fingerprint" in (
+        problems
+    )
+
+
+def test_a_malformed_fingerprint_is_a_problem(
+    smoke_run: Path, tmp_path: Path
+) -> None:
+    after = copy_run(smoke_run, tmp_path / "after")
+    rows = records(after)
+    rows[0]["fingerprint"] = "not a digest"
+    rewrite(after, rows)
+
+    problems = compare.compare(smoke_run, after, partial=True)
+
+    assert f"after: {SMOKE} plain execution -1 lacks a valid fingerprint" in (
+        problems
+    )
+
+
+def drop_events_field(out_dir: Path, field: str) -> None:
+    rows = records(out_dir)
+    for row in rows:
+        if row["mode"] == "events":
+            del row[field]
+    rewrite(out_dir, rows)
+
+
+@pytest.mark.parametrize("field", ["departures", "mechanism_ok"])
+def test_an_events_field_missing_in_one_run_is_a_problem(
+    smoke_run: Path, tmp_path: Path, field: str
+) -> None:
+    after = copy_run(smoke_run, tmp_path / "after")
+    drop_events_field(after, field)
+
+    problems = compare.compare(smoke_run, after, partial=True)
+
+    assert f"after: {SMOKE} events execution 0 lacks {field}" in problems
+
+
+@pytest.mark.parametrize("field", ["waiting_aircraft_turns", "mechanism"])
+def test_an_events_field_missing_in_both_runs_is_a_problem(
+    tmp_path: Path, smoke_run: Path, field: str
+) -> None:
+    """Both runs omitting a field is no evidence that it matches."""
+    before = copy_run(smoke_run, tmp_path / "before")
+    after = copy_run(smoke_run, tmp_path / "after")
+    drop_events_field(before, field)
+    drop_events_field(after, field)
+
+    problems = compare.compare(before, after, partial=True)
+
+    assert f"before: {SMOKE} events execution 0 lacks {field}" in problems
+    assert f"after: {SMOKE} events execution 0 lacks {field}" in problems
+
+
+def test_incomplete_records_are_reported_not_raised(
+    smoke_run: Path, tmp_path: Path
+) -> None:
+    after = copy_run(smoke_run, tmp_path / "after")
+    rows = records(after)
+    for row in rows:
+        if row["mode"] == "phases":
+            del row["run_ns"]
+        if row["mode"] == "profile":
+            del row["profile_top"]
+    rows.append({"mode": "plain", "status": "ok"})
+    rewrite(after, rows)
+
+    problems = compare.compare(smoke_run, after, partial=True)
+
+    assert f"after: {SMOKE} phases execution 0 lacks run_ns" in problems
+    assert f"after: {SMOKE} profile execution 0 lacks profile_top" in (
+        problems
+    )
+    assert any(p.startswith("after: 1 records lack scenario_id")
+               for p in problems)
 
 
 def test_a_missing_scenario_is_a_problem(

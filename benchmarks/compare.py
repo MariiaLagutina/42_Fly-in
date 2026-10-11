@@ -5,9 +5,12 @@
 The runs must be comparable and complete. The same scenarios (the whole
 matrix unless `--partial`), the same configuration, every scenario with
 its expected status and no timeout or error, every required measurement
-present, and the same behaviour: one fingerprint per scenario, equal in
-both runs, and equal non-timing `events` fields. Any gap is a problem;
-the comparison exits with 1 and lists them.
+present, and the same behaviour. Every successful execution, warm-ups
+included, must carry a valid fingerprint and the fields of its mode; the
+fingerprints of a scenario must be one and the same in both runs, and the
+non-timing `events` fields equal. Missing data is never taken as a match,
+even when both runs lack it. Any gap is a problem; the comparison exits
+with 1 and lists them.
 
 Timing: per scenario, the ratio of `plain` medians before / after (above
 1 is faster). A change counts as real only when it exceeds three times
@@ -21,6 +24,7 @@ from collections import defaultdict
 from collections.abc import Sequence
 import json
 from pathlib import Path
+import re
 import statistics
 import sys
 from typing import Any
@@ -45,7 +49,28 @@ TIMINGS = (
     ("per_turn_ns", "Per turn"),
     ("parse_ns", "Parse"),
 )
-PLAIN_FIELDS = ("parse_ns", "run_ns", "plan_ns", "turns_ns", "turns")
+# What every record needs, and what each mode adds. Fields in `*_VALUES`
+# must be present and not null; fields in `*_KEYS` must be present, as null
+# is a valid value (no route has no planned route, a run without turns no
+# turn percentile, a scenario without a mechanism no mechanism result).
+BASE_FIELDS = (
+    "scenario_id", "experiment", "mode", "repeat", "warmup", "params",
+    "expected", "status",
+)
+TIMED_VALUES = (
+    "parse_ns", "run_ns", "plan_ns", "turns_ns", "loop_other_ns", "turns",
+)
+TIMED_KEYS = ("turn_ns_p90",)
+EVENTS_VALUES = (
+    "turns", "departures", "waiting_aircraft_turns", "reroutes_weather",
+    "reroutes_deadlock", "weather_changes", "lane_closures",
+)
+EVENTS_KEYS = (
+    "planned_hops_mean", "planned_hops_max", "planned_makespan",
+    "mechanism", "mechanism_ok",
+)
+PROFILE_VALUES = ("turns", "profile_total_s", "profile_top")
+FINGERPRINT = re.compile(r"[0-9a-f]{64}")
 SWEEPS = {"E2": "hubs", "E3": "lanes", "E4": "aircraft"}
 
 
@@ -56,23 +81,51 @@ class Run:
             (out_dir / "environment.json").read_text(encoding="utf-8")
         )
         self.records = load(out_dir)
+        # Records without the fields every record has cannot be placed;
+        # they are only counted as problems.
+        self.unplaced = [
+            r for r in self.records
+            if any(field not in r for field in BASE_FIELDS)
+        ]
+        placed = [r for r in self.records if r not in self.unplaced]
         self.by_scenario: dict[str, list[Record]] = defaultdict(list)
-        for record in self.records:
+        for record in placed:
             self.by_scenario[record["scenario_id"]].append(record)
         # Incomplete records are reported as problems and kept out of the
-        # timings.
+        # summaries.
         self.summaries = {
             s.scenario_id: s
-            for s in summarize(r for r in self.records if _complete(r))
+            for s in summarize(r for r in placed if not record_gaps(r))
         }
 
 
-def _complete(record: Record) -> bool:
-    if record["mode"] != "plain" or record["warmup"]:
-        return True
+def record_gaps(record: Record) -> list[str]:
+    """
+    What a placed record lacks. A successful execution of any mode, warm-up
+    included, needs a valid fingerprint and the measurements of its mode;
+    a timeout or error has neither and is reported by `scenario_problems`.
+    """
     if record["status"] in ("timeout", "error"):
-        return True
-    return all(record.get(field) is not None for field in PLAIN_FIELDS)
+        return []
+    gaps = []
+    fingerprint = record.get("fingerprint")
+    if not isinstance(fingerprint, str) or not FINGERPRINT.fullmatch(
+        fingerprint
+    ):
+        gaps.append("a valid fingerprint")
+    values: tuple[str, ...] = ()
+    keys: tuple[str, ...] = ()
+    if record["mode"] in ("plain", "phases"):
+        values, keys = TIMED_VALUES, TIMED_KEYS
+        if record["mode"] == "phases":
+            values += ("phases",)
+    elif record["mode"] == "events":
+        values, keys = EVENTS_VALUES, EVENTS_KEYS
+    elif record["mode"] == "profile":
+        values = PROFILE_VALUES
+    gaps += [f for f in values if record.get(f) is None]
+    gaps += [f for f in keys if f not in record]
+    return gaps
 
 
 def run_problems(run: Run, label: str, partial: bool) -> list[str]:
@@ -90,30 +143,40 @@ def run_problems(run: Run, label: str, partial: bool) -> list[str]:
     problems += [f"{label}: {sid} was not declared" for sid in unknown]
     if "elapsed_s" not in run.environment:
         problems.append(f"{label}: the run did not finish")
+    if run.unplaced:
+        problems.append(
+            f"{label}: {len(run.unplaced)} records lack "
+            f"{', '.join(BASE_FIELDS)}"
+        )
 
     modes = run.environment.get("modes", [])
     # `repeats` is a number only when the run fixed it with --repeats.
     configured = run.environment.get("repeats")
     minimum = min(3, configured) if isinstance(configured, int) else 3
     for sid, records in sorted(run.by_scenario.items()):
-        scenario = scenario_by_id(sid)
+        try:
+            scenario = scenario_by_id(sid)
+        except KeyError:
+            problems.append(f"{label}: {sid} is not a known scenario")
+            continue
         problems += [f"{label}: {p}"
                      for p in scenario_problems(scenario, records)]
-        plain = [r for r in records
-                 if r["mode"] == "plain" and not r["warmup"]]
-        if "plain" in modes:
-            if len(plain) < minimum:
+        for record in records:
+            gaps = record_gaps(record)
+            if gaps:
                 problems.append(
-                    f"{label}: {sid} has {len(plain)} plain repeats, "
-                    f"needs {minimum}"
+                    f"{label}: {sid} {record['mode']} execution "
+                    f"{record['repeat']} lacks {', '.join(gaps)}"
                 )
-            for record in plain:
-                absent = [f for f in PLAIN_FIELDS if record.get(f) is None]
-                if absent:
-                    problems.append(
-                        f"{label}: {sid} plain repeat {record['repeat']} "
-                        f"lacks {', '.join(absent)}"
-                    )
+        plain = [r for r in records
+                 if r["mode"] == "plain" and not r["warmup"]
+                 and r["status"] not in ("timeout", "error")
+                 and not record_gaps(r)]
+        if "plain" in modes and len(plain) < minimum:
+            problems.append(
+                f"{label}: {sid} has {len(plain)} complete plain repeats, "
+                f"needs {minimum}"
+            )
         for mode in ("phases", "events"):
             if mode in modes and not any(
                 r["mode"] == mode and not r["warmup"] for r in records
@@ -148,9 +211,14 @@ def pair_problems(before: Run, after: Run) -> tuple[list[str], list[str]]:
         problems.append("scenario sets differ: " + ", ".join(only))
 
     for sid in sorted(set(before.by_scenario) & set(after.by_scenario)):
-        prints_before = before.summaries[sid].fingerprints
-        prints_after = after.summaries[sid].fingerprints
-        if len(prints_before | prints_after) > 1:
+        prints = {
+            r["fingerprint"]
+            for r in before.by_scenario[sid] + after.by_scenario[sid]
+            if isinstance(r.get("fingerprint"), str)
+        }
+        if not prints:
+            problems.append(f"{sid}: no fingerprint to compare")
+        elif len(prints) > 1:
             problems.append(f"{sid}: outcome fingerprints differ")
         events_before = _events(before.by_scenario[sid])
         events_after = _events(after.by_scenario[sid])
