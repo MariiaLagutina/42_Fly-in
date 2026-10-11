@@ -1,8 +1,8 @@
-# Maria's Airlanes
+# Mariia's Airlanes
 
 _Inspired by the 42 school project "Fly-in"._
 
-Maria's Airlanes is a turn-based air-traffic simulation. A fleet of aircraft
+Mariia's Airlanes is a turn-based air-traffic simulation. A fleet of aircraft
 departs from one hub and must reach a destination hub through a network of
 air lanes, while every hub and every lane has a limited capacity. The planner
 schedules each flight through space and time, so aircraft spread across
@@ -394,7 +394,7 @@ squash-merged into a single commit.
 
 The project started as "Fly-in", a 42 school assignment about moving a fleet
 through a capacity-limited graph in as few turns as possible. The compact text
-output still follows that assignment's format. Maria's Airlanes continues from
+output still follows that assignment's format. Mariia's Airlanes continues from
 there as an independent project focused on aviation-style simulation.
 
 ## Resources

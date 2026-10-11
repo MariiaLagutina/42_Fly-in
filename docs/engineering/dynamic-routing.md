@@ -1,6 +1,6 @@
 # Dynamic Routing Design
 
-Design for moving Maria's Airlanes from routes planned once before the first
+Design for moving Mariia's Airlanes from routes planned once before the first
 turn to routing decisions made during the simulation, as the world changes.
 
 This document describes the current model, the evidence collected for this
