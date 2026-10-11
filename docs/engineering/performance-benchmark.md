@@ -25,6 +25,7 @@ does not update them.
 - [Behaviour equivalence](#behaviour-equivalence)
 - [Analysis](#analysis)
 - [Conclusion for Stage 8B](#conclusion-for-stage-8b)
+- [Stage 8B: lane index](#stage-8b-lane-index)
 - [Limitations](#limitations)
 
 ## Running it
@@ -36,6 +37,7 @@ make benchmark ARGS="--scenario E5/bottleneck"    # one scenario
 make benchmark ARGS="--quick"                     # pilot: 1 repeat, no numbers to publish
 uv run --locked python -m benchmarks.run --list   # list scenario ids
 uv run --locked python -m benchmarks.summarize benchmarks/results/<run>
+uv run --locked python -m benchmarks.compare BEFORE AFTER   # behaviour, then speed-up
 ```
 
 The results below come from
@@ -463,6 +465,129 @@ adjacency index in `Graph` for `get_connection` and `get_neighbors`**.
 
 If Stage 8B is not approved, nothing here requires action: the bundled
 maps run in under a second.
+
+## Stage 8B: lane index
+
+Stage 8B implemented the one candidate above: `Graph` keeps an index of
+each zone's lanes in map order, and `Connection` fixes its endpoints and
+keeps its fields in slots. The lookup contract and the reasons are in
+[ADR-027](decisions.md#adr-027). Routing, admission, weather, parsing
+policy and output are unchanged.
+
+### How it was compared
+
+- **Before:** `main` at `89db821`, run from a separate worktree. **After:**
+  the feature branch at `432e1e7`.
+- Both runs used the full matrix and the 8A method: `--cpu 3`,
+  `PYTHONHASHSEED=0`, the same scenarios, seeds, warm-up, repeat rule and
+  statistics, on the same day, on the same machine with the same governor
+  and turbo setting.
+- `python -m benchmarks.compare` checked completeness and behaviour first,
+  then timing. It found no problem:
+  - both runs cover all 100 scenarios, with every required measurement;
+  - every scenario ended in its expected status;
+  - fingerprints and every non-timing `events` field are identical.
+- Speed-ups below are ratios of `plain` medians, before / after (above 1
+  is faster). A change counts as real only when it exceeds 3 × the sum of
+  both runs' MADs.
+- Whole sessions took 1245 s before and 336 s after. Session time is not
+  a measure of the change: it includes warm-ups, and scenarios that now
+  finish under 1 s get 7 repeats instead of 3.
+
+**Drift check (ABBA).** Six scenarios ran in the order before, after,
+after, before:
+
+- challenger without weather and with seed 2;
+- `E2/h400-s1`, `E3/d6.0-s1`, `E4/a100-s1`;
+- `E5/bottleneck`.
+
+Before against before differed by at most 5 %. After against after
+differed by −21 % to +7 %; those are the short optimized runs of
+150 ms to 1 s. Speed-ups agree between the two pairs: `E2/h400-s1` 11.6×
+and 11.1×, `E3/d6.0-s1` 6.7× and 6.7×, `E4/a100-s1` 3.5× and 3.9×,
+`E5/bottleneck` 1.9× and 2.5×, challenger 1.7–2.4×.
+
+### Results
+
+| Experiment | Run | Planning | Turn loop | Parse | Run, beyond noise |
+|---|---|---|---|---|---|
+| E1 bundled maps | 1.26× (0.93–2.64) | 1.33× | 1.09× | 0.97× | 27 / 48 faster, 0 slower |
+| E2 graph size | 4.30× (1.53–12.46) | 4.38× | 1.37× | 1.47× | 15 / 15 faster |
+| E3 lane density | 4.51× (2.97–7.10) | 4.57× | 1.26× | 1.47× | 12 / 12 faster |
+| E4 aircraft | 4.19× (3.64–5.22) | 4.36× | 1.35× | 1.44× | 18 / 18 faster |
+| E5 stress | 2.16× (0.94–2.66) | 2.18× | 1.14× | 1.11× | 5 / 7 faster, 0 slower |
+
+Medians over the scenarios of each experiment; the range is over its
+scenarios.
+
+Synthetic sweeps, medians over seeds, before → after:
+
+| Point | Run ms | Plan ms | Per turn ms | Parse ms |
+|---|---|---|---|---|
+| E2, 25 hubs | 19.6 → 12.7 | 18.6 → 11.7 | 0.056 → 0.050 | 0.39 → 0.39 |
+| E2, 100 hubs | 583 → 136 | 579 → 132 | 0.13 → 0.10 | 1.80 → 1.23 |
+| E2, 400 hubs | 11 600 → 963 | 11 600 → 949 | 0.40 → 0.26 | 14.7 → 4.87 |
+| E3, 300 lanes | 2 400 → 351 | 2 400 → 348 | 0.20 → 0.15 | 4.22 → 2.02 |
+| E4, 1 aircraft | 53.5 → 12.2 | 51.6 → 10.8 | 0.081 → 0.063 | 1.86 → 1.25 |
+| E4, 100 aircraft | 11 400 → 2 850 | 11 400 → 2 820 | 0.30 → 0.20 | 1.81 → 1.48 |
+
+Growth exponents (log-log slopes of the medians), before → after:
+
+| Experiment | Run | Planning | Per turn |
+|---|---|---|---|
+| E2, against hubs | 2.34 → 1.59 | 2.35 → 1.62 | 0.73 → 0.61 |
+| E3, against lanes | 1.95 → 1.12 | 1.96 → 1.13 | 0.65 → 0.50 |
+| E4, against aircraft | 1.13 → 1.17 | 1.14 → 1.20 | 0.27 → 0.25 |
+
+At a fixed lane density, planning still grows faster than linearly with
+hubs: routes get longer, and the cooperative search has costs of its own.
+Against aircraft the exponent stays about 1.2, as planning remains one
+search per aircraft.
+
+### By kind of scenario
+
+- **Larger bundled maps** (hard, bonus, challenger): run 1.24–2.64×,
+  median 1.46×. Challenger without weather went from 372 to 151 ms.
+- **Small maps** (easy and medium, runs under 5 ms): run median 1.06×,
+  range 0.93–1.64×; no scenario is slower beyond noise.
+- **Weather-heavy turns:** the turn loop of challenger with weather is
+  1.33–1.63× faster, europa 1.24–1.46×, hard/03 1.19–1.29×. `find_route`
+  still scans the lane list, but the lookups around it are cheaper.
+- **Parsing:** faster on large maps (14.7 → 4.9 ms at 400 hubs). The
+  duplicate check of every lane now walks one hub's lanes. On small maps,
+  parsing is within noise (E1 median 0.97×). One parse is slower beyond
+  noise: `E5/deadlock`, 0.12 → 0.14 ms on a seven-lane map, the cost of
+  constructing a `Connection` with slots and a guard.
+- **Runs that do not complete:** `E5/disconnected` (`no_route`) 0.31 →
+  0.33 ms and `E5/deadlock` 0.62 → 0.66 ms, both within noise.
+
+### Profiles after the change
+
+- `Connection.connects` calls on `E2/h400-s1` fell from 154 million to
+  3.0 million.
+- The profiled run fell from 36.9 to 3.1 s on `E2/h400-s1`, from 47.6 to
+  10.5 s on `E4/a100-s1`, and from 1.40 to 0.58 s on challenger.
+- The largest own-time share is now the cooperative search itself
+  (`find_cooperative_path` 22–28 %, `_is_move_valid` 11–12 %). The graph
+  lookups fell to 8–10 % for `get_connection` and about 6 % for the index
+  access.
+- `find_route` is 10 % of `E2/h400-s1`.
+
+### A correction during implementation
+
+The first version guarded the endpoints with `__setattr__` alone, on the
+assumption that reads would stay fast. Measured, they did not:
+
+- a class with its own `__setattr__` loses CPython's fast path for
+  instance attribute reads, about 1.35 times slower;
+- small maps became 10–25 % slower;
+- `E5/disconnected` became twice as slow;
+- weather-heavy turns became 8–16 % slower, all through code the index
+  does not touch.
+
+Behaviour was unaffected. Moving the fields to `__slots__` restored read
+speed (0.97 of `main` in a micro-benchmark) and kept the guard. The
+results above are from the corrected version.
 
 ## Limitations
 

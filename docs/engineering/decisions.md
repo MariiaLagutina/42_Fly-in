@@ -39,6 +39,7 @@ text; the superseding ADR states what it replaces.
 | [ADR-024](#adr-024) | Turn results are typed outcomes of completed turns | Accepted |
 | [ADR-025](#adr-025) | The map format is strict: missing input takes a default, invalid input is an error | Accepted |
 | [ADR-026](#adr-026) | Hub capacity is observed as committed load | Accepted |
+| [ADR-027](#adr-027) | Graph lookups follow a fixed contract and use a lane index | Accepted |
 
 ---
 
@@ -1749,3 +1750,100 @@ aircraft it drew in the hub ([DECISION-013](open-decisions.md#decision-013)).
   viewers render identical frames.
 - Whether lane capacity should be drawn on the Pygame maps, for example as
   line width, is left to the visual design of the maps.
+
+## ADR-027
+
+### Graph lookups follow a fixed contract and use a lane index
+
+- **Status:** Accepted
+- **Date:** 2026-10-11
+
+**Context.** `Graph.get_connection` and `Graph.get_neighbors` scanned every
+lane of the map on every call. The performance benchmark
+([performance-benchmark.md](performance-benchmark.md)) found that initial
+cooperative planning dominates every slow run, and that these scans took
+69–92 % of the profiled time: 154 million `Connection.connects` calls on a
+400-hub map. Routing and the executor depend on exactly what the lookups
+return, including cases the parser never produces, so the lookups needed a
+written contract before their implementation could change.
+
+**Decision.**
+
+- **Lookup contract.** It is the behaviour of the former scan, now pinned
+  by tests:
+  - `get_connection(a, b)` returns the first lane in map order that joins
+    `a` and `b`, in either direction, or `None`. With duplicate lanes, the
+    first one wins.
+  - `get_connection(a, a)` returns the first lane of `a`, whatever its
+    other end, not a loop; `None` if `a` has no lane. This is kept for
+    compatibility, not endorsed.
+  - `get_neighbors(zone)` returns the other end of every lane of `zone` in
+    map order, repeats included. A loop makes a zone its own neighbour once.
+    A neighbour is included only if it is accessible at the time of the
+    call. Every call returns a new list.
+  - Zones are told apart by identity, not by name. A zone need not be
+    registered in `graph.zones` to be connected.
+- **Lane index.** `Graph` keeps, for every zone object, its lanes in map
+  order; a loop is listed once. Both lookups walk only the lanes of the
+  zone they are given. Every lane joining two zones is a lane of either
+  zone, in the same relative order as in `connections`, so the first match
+  and the neighbour order are those of the scan. Internal lists are never
+  returned.
+- **Synchronization.** `add_connection` is the supported way to add a
+  lane and keeps the index current. If the length of `connections` differs
+  from the number of indexed lanes, for example after a direct `append`,
+  the index is rebuilt before the next lookup. That check sees only the
+  length. Replacing a lane in place, or reordering the list, is not
+  supported and is not detected.
+- **Fixed endpoints.** A `Connection`'s `zone_a` and `zone_b` cannot be
+  reassigned or deleted after creation; trying raises `AttributeError`.
+  Capacity, mode and distance can still be set.
+- **Slots.** `Connection` keeps its five fields in `__slots__` and has no
+  `__dict__`. A connection takes no attributes beyond `zone_a`, `zone_b`,
+  `max_link_capacity`, `mode` and `distance`. A subclass without slots of
+  its own may add attributes, and keeps the endpoint guard. Copies and
+  pickling keep the fields and the guard.
+
+**Rationale.**
+
+- An index of each zone's lanes in map order preserves the scan's results
+  by construction. A dictionary keyed by pairs of zones would be faster
+  only for `get_connection`. It would need special cases for `(a, a)` and
+  for duplicates, and a second structure to keep in sync; at a degree of 3
+  to 6 lanes per hub, walking a hub's lanes costs little.
+- Keying by zone object keeps the identity semantics of `connects`.
+  Keying by name would merge distinct zones that share a name.
+- Accessibility is read on every call, as before, because a zone's type is
+  an ordinary attribute. A cached neighbour list would go stale.
+- An index rebuilt lazily whenever the length changed was measured. The
+  parser checks for a duplicate after every lane it adds, so parsing
+  rebuilt the index each time and became 2.6 times slower on 400 hubs.
+  The index is therefore updated in `add_connection`, and the length check
+  remains only as a fallback.
+- Endpoints are fixed because an index cannot follow a lane whose ends
+  change. A guard in `__setattr__` alone slowed every attribute read of a
+  `Connection` by about 1.35 times on CPython 3.14: a class with its own
+  `__setattr__` loses the fast path for reading attributes from `__dict__`.
+  Read-only properties were slower still. With slots, reads stay as fast as
+  before (about 0.97 of the plain class) and the guard stays. The
+  constructor sets the fields with `object.__setattr__`, past the guard.
+
+**Consequences.**
+
+- Behaviour is unchanged, verified against `main`:
+  - complete event streams, `CapacitySnapshot` included: 1,872 runs of
+    bundled and generated maps, 372 bundled runs and 60,000 corpus runs;
+  - CLI output, text output, Standard and Airlines Pygame frames, the
+    dispatch board and 1,027 parses are byte-identical;
+  - simulation invariants hold in every run;
+  - all 100 benchmark scenarios keep their fingerprints, statuses and
+    workload counts.
+- Planning is about 4.4–4.6 times faster on the synthetic scaling
+  experiments (median) and up to 12.6 times faster at 400 hubs. Growth
+  against lane count drops from about lanes^2 to lanes^1.1. The
+  [benchmark document](performance-benchmark.md#stage-8b-lane-index) has
+  the before and after results.
+- Constructing a `Connection` costs more than before, about 0.35 µs per
+  lane, paid while parsing.
+- `find_route` still scans `graph.connections` itself and is unchanged.
+
