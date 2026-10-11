@@ -17,7 +17,7 @@ define mypy_all
 endef
 
 .PHONY: install hooks run run-pygame run-pygame-airlines debug check-sources \
-	lint lint-strict test coverage check benchmark clean
+	lint lint-strict test coverage check benchmark screenshots clean
 
 install:
 	uv sync --locked
@@ -65,6 +65,11 @@ check: lint-strict test
 # go in ARGS, e.g. make benchmark ARGS="--experiment E2".
 benchmark:
 	uv run --locked python -m benchmarks.run $(ARGS)
+
+# The README screenshots in docs/images, captured headless; see
+# scripts/capture_screenshots.py.
+screenshots:
+	uv run --locked python -m scripts.capture_screenshots
 
 clean:
 	find . -type d -name __pycache__ -exec rm -rf {} +

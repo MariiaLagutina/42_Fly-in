@@ -712,6 +712,19 @@ class AirlinesWindow:
         y = self._draw_weather_alerts(y)
         self._draw_live_departures(y)
 
+    def draw(self) -> None:
+        """Draw the replayed turn back to front: background, lanes and
+        cities, vehicles, controls, sidebar."""
+        self.screen.fill(self.COLOR_OVERLAY_BG)
+
+        if self.bg_image:
+            self.screen.blit(self.bg_image, (0, 0))
+
+        self._draw_map()
+        self._draw_drones()
+        self._draw_map_controls()
+        self._draw_sidebar()
+
     def run_loop(self) -> None:
         running = True
         while running:
@@ -756,16 +769,7 @@ class AirlinesWindow:
                 else:
                     self.is_playing = False
 
-            self.screen.fill(self.COLOR_OVERLAY_BG)
-
-            if self.bg_image:
-                self.screen.blit(self.bg_image, (0, 0))
-
-            self._draw_map()
-            self._draw_drones()
-            self._draw_map_controls()
-            self._draw_sidebar()
-
+            self.draw()
             pygame.display.flip()
             self.clock.tick(UIConstants.FPS)
 
