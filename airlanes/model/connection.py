@@ -6,8 +6,20 @@ if TYPE_CHECKING:
     from airlanes.model.zone import Zone
 
 
+# Attributes fixed once a connection is created.
+_ENDPOINTS = frozenset({"zone_a", "zone_b"})
+
+
 class Connection:
-    """Represents a connection between two zones."""
+    """
+    Represents a connection between two zones.
+
+    Its endpoints are fixed once it is created: the graph indexes its lanes
+    by hub (ADR-027), so reassigning or deleting `zone_a` or `zone_b`
+    raises `AttributeError`. Reading them is an ordinary attribute access.
+    Capacity, mode and distance can still be set after creation.
+    """
+
     def __init__(
         self,
         zone_a: "Zone",
@@ -21,6 +33,20 @@ class Connection:
         self.max_link_capacity = max_link_capacity
         self.mode = mode
         self.distance: int = 0
+
+    def __setattr__(self, name: str, value: object) -> None:
+        if name in _ENDPOINTS and name in self.__dict__:
+            raise AttributeError(
+                f"A connection's {name} cannot change after it is created."
+            )
+        super().__setattr__(name, value)
+
+    def __delattr__(self, name: str) -> None:
+        if name in _ENDPOINTS:
+            raise AttributeError(
+                f"A connection's {name} cannot be deleted."
+            )
+        super().__delattr__(name)
 
     def connects(self, zone: "Zone") -> bool:
         """Check if the connection connects to the given zone."""
