@@ -275,16 +275,20 @@ def test_an_unexpected_status_or_timeout_is_a_problem(
 def test_an_unfinished_run_or_other_configuration_is_a_problem(
     smoke_run: Path, tmp_path: Path
 ) -> None:
+    # Both governors are set, so the host's own governor cannot hide the
+    # difference.
+    before = copy_run(smoke_run, tmp_path / "before")
     after = copy_run(smoke_run, tmp_path / "after")
+    set_environment(before, cpu_governor="powersave")
     set_environment(after, elapsed_s=None, pinned_cpu=5,
                     cpu_governor="performance")
 
-    problems = compare.compare(smoke_run, after, partial=True)
+    problems = compare.compare(before, after, partial=True)
 
     assert "after: the run did not finish" in problems
     assert "configuration differs: pinned_cpu None -> 5" in problems
     report = (after / "compare.md").read_text()
-    assert "cpu_governor: " in report
+    assert "- cpu_governor: 'powersave' -> 'performance'\n" in report
 
 
 def test_the_command_exits_with_one_on_a_problem(
