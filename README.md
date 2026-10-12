@@ -236,8 +236,9 @@ Weather is random and not seeded, so two runs of the same map can differ.
 - cities colored by population
 - airplanes on air legs and cars on road legs, outlined with `pygame.mask` so
   they stay readable on the map
-- lanes that show capacity, weather, and closures (see below), with weather
-  icons
+- on the Germany and Europe maps, lanes that show capacity, weather, and
+  closures (see below); on other maps, lanes colored by weather. Both with
+  weather icons
 - a departure board with a flight number and status for every aircraft:
   `EN ROUTE` on an air leg, `DRIVING` on a road leg, `WEATHER REROUTE` on
   the first leg after weather changed the route, and, at an intermediate
@@ -260,7 +261,8 @@ The standard viewer (`--pygame`) uses the same controls.
 
 ### Reading the map
 
-In the dispatch center, each line style answers one question:
+On the Germany and Europe maps, each line style in the dispatch center
+answers one question:
 
 | Question | How the lane shows it |
 | --- | --- |

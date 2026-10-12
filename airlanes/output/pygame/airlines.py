@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 import math
 from pathlib import Path
 import random
@@ -40,18 +41,25 @@ from airlanes.output.pygame.lanes import (
 )
 
 
-# Background image of each bundled geographic map, by map file name. Hub
-# coordinates of these maps are drawn on their image; any other map gets the
-# plain dispatch-center background.
-MAP_BACKGROUNDS = {
-    "europa_map.txt": "europa.png",
-    "germany_map.txt": "germany.png",
+@dataclass(frozen=True)
+class MapView:
+    """How the dispatch center draws a bundled geographic map: over its
+    background image, with lane capacity and closures (ADR-028)."""
+    background: str
+
+
+# The bundled geographic maps, by map file name. Hub coordinates of these
+# maps are drawn on their image. Any other map keeps the original lane
+# drawing on the plain dispatch-center background.
+GEOGRAPHIC_MAPS = {
+    "europa_map.txt": MapView("europa.png"),
+    "germany_map.txt": MapView("germany.png"),
 }
 
 
-def background_for(map_path: str | Path) -> Optional[str]:
-    """The background image for a map file, or None for a plain one."""
-    return MAP_BACKGROUNDS.get(Path(map_path).name)
+def view_for(map_path: str | Path) -> Optional[MapView]:
+    """The geographic view of a map file, or None for any other map."""
+    return GEOGRAPHIC_MAPS.get(Path(map_path).name)
 
 
 class FlightInfo(TypedDict):
@@ -81,13 +89,13 @@ class AirlinesWindow:
     def __init__(
         self,
         visualizer: PygameAirlinesVisualizer,
-        background: Optional[str] = None,
+        view: Optional[MapView] = None,
     ) -> None:
-        """`background` names an image in the asset directory; None draws
-        the plain dispatch-center background."""
+        """`view` is the geographic view of a bundled map; None draws the
+        original lanes on the plain dispatch-center background."""
         self.visualizer = visualizer
         self.graph = visualizer.graph
-        self.background = background
+        self.view = view
 
         self._setup_layout()
         self._setup_pygame()
@@ -208,10 +216,10 @@ class AirlinesWindow:
         return f"{population//1000}K"
 
     def _load_background(self) -> Optional[pygame.surface.Surface]:
-        if self.background is None:
+        if self.view is None:
             return None
         try:
-            bg = pygame.image.load(IMG_DIR / self.background)
+            bg = pygame.image.load(IMG_DIR / self.view.background)
             return pygame.transform.scale(bg, (self.map_width, self.height))
         except FileNotFoundError:
             return None
@@ -311,18 +319,20 @@ class AirlinesWindow:
             f"  -> Hub Load:            {hub_load}",
         ]
 
-    def _weather_alert_color(self, condition: str) -> tuple[int, int, int]:
-        """Text colour of a weather alert, in the condition's lane colour
-        family."""
+    def _weather_style(
+        self, condition: str
+    ) -> tuple[tuple[int, int, int], int]:
+        """Colour and width of a lane in the original drawing; the colour
+        is also that of the condition's weather alert."""
         if condition == "storm":
-            return UIColors.RED
+            return UIColors.RED, 4
         if condition == "snow":
-            return UIColors.HIGHLIGHT
+            return UIColors.HIGHLIGHT, 4
         if condition == "rain":
-            return UIColors.BLUE
+            return UIColors.BLUE, 4
         if condition == "tailwind":
-            return UIColors.GREEN
-        return UIColors.TEXT_MUTED
+            return UIColors.GREEN, 4
+        return UIColors.TEXT_MUTED, 3
 
     def _draw_weather_icon(
         self, connection: Connection, condition: str
@@ -381,9 +391,23 @@ class AirlinesWindow:
         return strokes
 
     def _draw_weather_connections(self) -> None:
+        if self.view is None:
+            self._draw_original_connections()
+            return
         draw_lanes(self.screen, self._lane_strokes())
         for connection in self.graph.connections:
             condition = self.connection_weather.get(connection.name(), "clear")
+            self._draw_weather_icon(connection, condition)
+
+    def _draw_original_connections(self) -> None:
+        """Lanes of a map without a geographic view: coloured by weather
+        only, as before the geographic lane styling."""
+        for connection in self.graph.connections:
+            start = (connection.zone_a.x, connection.zone_a.y)
+            end = (connection.zone_b.x, connection.zone_b.y)
+            condition = self.connection_weather.get(connection.name(), "clear")
+            color, thickness = self._weather_style(condition)
+            pygame.draw.line(self.screen, color, start, end, thickness)
             self._draw_weather_icon(connection, condition)
 
     def _draw_city_name(self, zone: Zone) -> None:
@@ -593,7 +617,7 @@ class AirlinesWindow:
 
         for conn_name, cond in self.connection_weather.items():
             if cond != "clear":
-                w_color = self._weather_alert_color(cond)
+                w_color, _ = self._weather_style(cond)
                 c_text = self.dashboard_font.render(
                     f"{conn_name}: {cond.upper()}", True, w_color
                 )
@@ -778,7 +802,7 @@ class AirlinesWindow:
 
 
 def run_pygame_airlines(
-    visualizer: PygameAirlinesVisualizer, background: Optional[str] = None
+    visualizer: PygameAirlinesVisualizer, view: Optional[MapView] = None
 ) -> None:
-    window = AirlinesWindow(visualizer, background)
+    window = AirlinesWindow(visualizer, view)
     window.run_loop()

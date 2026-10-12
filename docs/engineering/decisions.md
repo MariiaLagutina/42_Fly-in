@@ -1867,10 +1867,13 @@ was.
 **Decision.**
 
 - **Geographic view only.** Lane styling lives in
-  `airlanes/output/pygame/lanes.py` and only the dispatch center uses it.
-  The style follows the viewer, never the map's size or capacities. The
-  standard viewer keeps its drawing: lane colours, widths, white edges,
-  the 6 px offset, active lanes and hubs.
+  `airlanes/output/pygame/lanes.py`. The dispatch center uses it only for a
+  map with a geographic view: `GEOGRAPHIC_MAPS` names, by map file name,
+  the `MapView` of Germany and Europe. Any other map in the dispatch
+  center keeps its original lanes, coloured by weather. The style never
+  follows the map's size or capacities. The standard viewer keeps its
+  drawing: lane colours, widths, white edges, the 6 px offset, active
+  lanes and hubs.
 - **Capacity.** Width by capacity class: 3 px for 1, 4 px for 2–3, 5 px
   for 4–6 and 7+. Within each weather colour family the shade deepens with
   the class, so 7+ differs from 4–6 by shade only.
@@ -1882,15 +1885,15 @@ was.
   drawn first, and all outlines before any lane colour. Lanes joining the
   same two hubs are spread symmetrically; a single lane joins the hub
   centres.
-- **Background.** `AirlinesWindow` takes its background explicitly.
-  `MAP_BACKGROUNDS` names the image of each bundled geographic map by file
-  name, and any other map gets a plain background.
+- **Background.** `AirlinesWindow` takes its view explicitly, and a
+  `MapView` names its background image. A map without a view gets a plain
+  background.
 
 **Rationale.**
 
-- Choosing the style by viewer keeps the challenge maps exactly as they
-  were and needs no rule about which map is "geographic". A rule based on
-  hub count or capacities would change silently with a new map.
+- An explicit list of geographic maps keeps the challenge maps exactly as
+  they were, in both viewers. A rule based on hub count or capacities
+  would change silently with a new map.
 - Width alone cannot separate 4–6 from 7+ within a 5 px limit; shade can.
   Snow stays in pale shades and rain in deep ones, because the two blues
   differ only in lightness. Clear and tailwind avoid the lightness of the
@@ -1904,11 +1907,12 @@ was.
 **Consequences.**
 
 - Every frame of the standard viewer on all twelve bundled maps is
-  pixel-identical to the Stage 9b base (207 frames). A test pins the lines
-  and circles it draws on the ten original challenge maps.
+  pixel-identical to the Stage 9b base (207 frames). Tests pin the lines
+  and circles that the standard viewer and the dispatch center draw on the
+  ten original challenge maps.
 - Simulation behaviour is unchanged: event streams, turn results, capacity
   snapshots, CLI and text output, parsing, and benchmark fingerprints.
-- The dispatch center looks different on every map. A map other than
-  Germany or Europe now has a plain background instead of Germany.
+- The dispatch center draws Germany and Europe differently. Any other map
+  keeps its lanes and now has a plain background instead of Germany.
 - An air and a road lane have the same line style; the mode shows only
   through the vehicle on the lane and through closures.

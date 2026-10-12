@@ -95,12 +95,12 @@ def main() -> int:
 
     if airlines_pygame_visualizer is not None:
         from airlanes.output.pygame.airlines import (
-            background_for,
             run_pygame_airlines,
+            view_for,
         )
 
         run_pygame_airlines(
-            airlines_pygame_visualizer, background_for(args.map_file)
+            airlines_pygame_visualizer, view_for(args.map_file)
         )
         return EXIT_OK
 

@@ -28,7 +28,7 @@ from airlanes.mapfile import Parser
 from airlanes.output.pygame.airlines import (
     AirlinesWindow,
     PygameAirlinesVisualizer,
-    background_for,
+    view_for,
 )
 from airlanes.output.pygame.standard import (
     DroneSimulationWindow,
@@ -92,7 +92,7 @@ def dispatch_center(shot: Shot) -> AirlinesWindow:
     Simulator(graph, nb_aircraft, dispatcher, weather=weather).run()
 
     random.seed(FLIGHT_NUMBER_SEED)
-    window = AirlinesWindow(viewer, background_for(shot.map_path))
+    window = AirlinesWindow(viewer, view_for(shot.map_path))
     window.is_playing = False
     window._goto_turn(shot.turn)
     return window
