@@ -66,8 +66,8 @@ check: lint-strict test
 benchmark:
 	uv run --locked python -m benchmarks.run $(ARGS)
 
-# The README screenshots in docs/images, captured headless; see
-# scripts/capture_screenshots.py.
+# The README screenshots and animations in docs/images, captured headless;
+# see scripts/capture_screenshots.py.
 screenshots:
 	uv run --locked python -m scripts.capture_screenshots
 

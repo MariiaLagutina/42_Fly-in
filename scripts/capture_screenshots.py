@@ -1,12 +1,14 @@
 """
-Capture the README screenshots from the Pygame viewers, headless.
+Capture the README screenshots and animations from the Pygame viewers,
+headless.
 
-Each screenshot is the window surface of one replayed turn, saved without
-an operating-system frame. Weather comes from a fixed seed, flight numbers
-from a fixed seed of the global generator, and the clock behind the
-rainbow hub colour is frozen, so the same environment always produces the
-same PNG files. Fonts come from the system, so other machines may render
-text differently.
+A screenshot is the window surface of one replayed turn, or a 1:1 crop of
+it, saved without an operating-system frame. An animation is one frame
+per consecutive turn of a single run, nothing in between, saved as a
+looping GIF. Weather comes from a fixed seed, flight numbers from a fixed
+seed of the global generator, and the clock behind the rainbow hub colour
+is frozen, so the same environment always produces the same files. Fonts
+come from the system, so other machines may render text differently.
 
 Usage: uv run --locked python -m scripts.capture_screenshots [OUT_DIR]
 (default docs/images; `make screenshots`).
@@ -21,6 +23,7 @@ import random
 import sys
 import time
 
+from PIL import Image
 import pygame
 
 from airlanes.events import EventDispatcher
@@ -54,11 +57,28 @@ class Shot:
     # Weather seed of the dispatch center; None for the standard viewer,
     # which runs without weather.
     weather_seed: int | None
+    # (left, top, width, height) of a 1:1 crop of the window; None keeps
+    # the whole window.
+    crop: tuple[int, int, int, int] | None = None
 
+
+@dataclass(frozen=True)
+class Animation:
+    """Consecutive turns of one dispatch-center run, first to last."""
+    file_name: str
+    map_path: str
+    weather_seed: int
+    first_turn: int
+    last_turn: int
+
+
+GERMANY = "maps/bonus/germany_map.txt"
+EUROPE = "maps/bonus/europa_map.txt"
 
 SHOTS = (
-    Shot("europe-simulation.png", "maps/bonus/europa_map.txt", 13, 39),
-    Shot("germany-simulation.png", "maps/bonus/germany_map.txt", 9, 11),
+    Shot("europe-simulation.png", EUROPE, 27, 1),
+    # A crop of the Germany animation's turn 9, around Hamburg and Berlin.
+    Shot("germany-detail.png", GERMANY, 9, 46, crop=(360, 70, 480, 400)),
     Shot(
         "challenger-turn-viewer.png",
         "maps/challenger/01_the_impossible_dream.txt",
@@ -66,6 +86,16 @@ SHOTS = (
         None,
     ),
 )
+
+ANIMATIONS = (
+    Animation("germany-dispatch-center.gif", GERMANY, 46, 3, 13),
+    Animation("europe-dispatch-center.gif", EUROPE, 1, 18, 28),
+)
+
+# Display time of each turn, and of the last turn before the loop starts
+# again.
+FRAME_MS = 1200
+HOLD_MS = 2500
 
 
 @contextmanager
@@ -81,18 +111,26 @@ def headless() -> Iterator[None]:
         time.time = real_time
 
 
-def dispatch_center(shot: Shot) -> AirlinesWindow:
-    """The dispatch center of a seeded run, at the shot's turn. Call it
+def seeded_dispatch_center(
+    map_path: str, weather_seed: int | None
+) -> AirlinesWindow:
+    """The dispatch center over a finished run with seeded weather. Call it
     inside `headless()`."""
-    graph, nb_aircraft = Parser().parse(str(REPO_ROOT / shot.map_path))
+    graph, nb_aircraft = Parser().parse(str(REPO_ROOT / map_path))
     viewer = PygameAirlinesVisualizer(graph)
     dispatcher = EventDispatcher()
     dispatcher.add_listener(viewer)
-    weather = RandomWeather(graph, seed=shot.weather_seed)
+    weather = RandomWeather(graph, seed=weather_seed)
     Simulator(graph, nb_aircraft, dispatcher, weather=weather).run()
 
     random.seed(FLIGHT_NUMBER_SEED)
-    window = AirlinesWindow(viewer, view_for(shot.map_path))
+    return AirlinesWindow(viewer, view_for(map_path))
+
+
+def dispatch_center(shot: Shot) -> AirlinesWindow:
+    """The dispatch center paused at the shot's turn. Call it inside
+    `headless()`."""
+    window = seeded_dispatch_center(shot.map_path, shot.weather_seed)
     window.is_playing = False
     window._goto_turn(shot.turn)
     return window
@@ -125,9 +163,64 @@ def capture(shot: Shot, out_dir: Path) -> str:
                 window = dispatch_center(shot)
                 window.draw()
                 surface = window.screen
+            if shot.crop is not None:
+                surface = surface.subsurface(pygame.Rect(shot.crop))
             pygame.image.save(surface, str(path))
         finally:
             pygame.quit()
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def animation_frames(animation: Animation) -> list[Image.Image]:
+    """One image of the whole window per turn, first to last."""
+    frames = []
+    with headless():
+        try:
+            window = seeded_dispatch_center(
+                animation.map_path, animation.weather_seed
+            )
+            # The window plays the turns, as in autoplay.
+            window.is_playing = True
+            for turn in range(animation.first_turn, animation.last_turn + 1):
+                window._goto_turn(turn)
+                window.draw()
+                frames.append(
+                    Image.frombytes(
+                        "RGB",
+                        window.screen.get_size(),
+                        pygame.image.tobytes(window.screen, "RGB"),
+                    )
+                )
+        finally:
+            pygame.quit()
+    return frames
+
+
+def capture_animation(animation: Animation, out_dir: Path) -> str:
+    """Save the animation as a looping GIF in `out_dir`; return its
+    SHA-256."""
+    frames = animation_frames(animation)
+    # One palette for every frame, taken from the first and the middle
+    # turn, so colours do not flicker from turn to turn.
+    width, height = frames[0].size
+    sample = Image.new("RGB", (width, height * 2))
+    sample.paste(frames[0], (0, 0))
+    sample.paste(frames[len(frames) // 2], (0, height))
+    palette = sample.quantize(colors=256, method=Image.Quantize.MEDIANCUT)
+    images = [
+        frame.quantize(palette=palette, dither=Image.Dither.NONE)
+        for frame in frames
+    ]
+    path = out_dir / animation.file_name
+    images[0].save(
+        path,
+        save_all=True,
+        append_images=images[1:],
+        duration=[FRAME_MS] * (len(images) - 1) + [HOLD_MS],
+        loop=0,
+        optimize=True,
+        disposal=1,
+    )
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
@@ -137,6 +230,9 @@ def main(argv: list[str]) -> int:
     for shot in SHOTS:
         digest = capture(shot, out_dir)
         print(f"{digest}  {out_dir / shot.file_name}")
+    for animation in ANIMATIONS:
+        digest = capture_animation(animation, out_dir)
+        print(f"{digest}  {out_dir / animation.file_name}")
     return 0
 
 
