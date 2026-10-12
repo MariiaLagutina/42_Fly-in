@@ -2,6 +2,7 @@
 vehicle count."""
 
 import hashlib
+from itertools import permutations
 import math
 from pathlib import Path
 import sys
@@ -132,6 +133,81 @@ def test_europe_terminals_are_reassigned_too() -> None:
     assert terminals(graph) == (["Milan"], ["Lisbon"])
     assert graph.zones["Reykjavik"].effective_capacity() == 15
     assert graph.zones["Athens"].effective_capacity() == 15
+
+
+@pytest.mark.parametrize(
+    ("map_file", "start", "end"),
+    [(GERMANY, "Kiel", "Munich"), (EUROPE, "Reykjavik", "Athens")],
+    ids=["germany", "europe"],
+)
+def test_choosing_the_map_terminals_gives_the_map_graph(
+    map_file: Path, start: str, end: str
+) -> None:
+    original, _ = Parser().parse(str(map_file))
+
+    graph = load_scenario_graph(map_file, start, end)
+
+    assert terminals(graph) == terminals(original) == ([start], [end])
+    assert graph.start_zone is graph.zones[start]
+    assert graph.end_zone is graph.zones[end]
+    assert {
+        z.name: z.effective_capacity() for z in graph.zones.values()
+    } == {z.name: z.effective_capacity() for z in original.zones.values()}
+
+
+@pytest.mark.parametrize(
+    ("map_file", "first", "second"),
+    [(GERMANY, "Berlin", "Munich"), (EUROPE, "Lisbon", "Helsinki")],
+    ids=["germany", "europe"],
+)
+def test_a_reversed_selection_swaps_the_roles(
+    map_file: Path, first: str, second: str
+) -> None:
+    there = load_scenario_graph(map_file, first, second)
+    back = load_scenario_graph(map_file, second, first)
+
+    assert terminals(there) == ([first], [second])
+    assert terminals(back) == ([second], [first])
+    assert back.start_zone is back.zones[second]
+    assert back.end_zone is back.zones[first]
+
+
+def test_new_terminals_keep_their_map_capacity_value() -> None:
+    """Terminals are unlimited through `effective_capacity`; their own
+    `max_drones` is not overwritten."""
+    graph = load_scenario_graph(GERMANY, "Berlin", "Schwerin")
+
+    assert graph.zones["Berlin"].max_drones == 36
+    assert graph.zones["Schwerin"].max_drones == 1
+    assert graph.zones["Berlin"].effective_capacity() == math.inf
+    assert graph.zones["Schwerin"].effective_capacity() == math.inf
+
+
+@pytest.mark.parametrize(
+    "map_file", [GERMANY, EUROPE], ids=["germany", "europe"]
+)
+def test_every_pair_of_hubs_gives_consistent_terminals(
+    map_file: Path,
+) -> None:
+    """For every ordered pair of hubs: exactly the two chosen hubs are
+    terminals, the graph references them, and every other hub is limited
+    by its unchanged map capacity."""
+    original, _ = Parser().parse(str(map_file))
+    capacities = {z.name: z.max_drones for z in original.zones.values()}
+
+    for start, end in permutations(capacities, 2):
+        graph = load_scenario_graph(map_file, start, end)
+
+        assert terminals(graph) == ([start], [end])
+        assert graph.start_zone is graph.zones[start]
+        assert graph.end_zone is graph.zones[end]
+        for zone in graph.zones.values():
+            assert zone.max_drones == capacities[zone.name]
+            expected = (
+                math.inf if zone.name in (start, end)
+                else capacities[zone.name]
+            )
+            assert zone.effective_capacity() == expected
 
 
 @pytest.mark.parametrize(
