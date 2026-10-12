@@ -16,7 +16,11 @@ from airlanes.model.transport_mode import TransportMode
 from airlanes.model.zone import Zone, ZoneType
 from airlanes.results import Arrival, Departure, Reroute, TurnResult
 from airlanes.simulation.deadlock import DeadlockError
-from airlanes.simulation.engine import Simulator
+from airlanes.simulation.engine import (
+    NoRouteError,
+    Simulator,
+    TurnLimitError,
+)
 from airlanes.world.weather import ScriptedWeather, WeatherCondition
 
 from tests.support.graphs import Link, build_graph, end_hub, hub, start_hub
@@ -195,8 +199,15 @@ def test_start_and_end_hold_every_aircraft() -> None:
     ],
 )
 def test_missing_route_fails_before_the_first_turn(graph: Graph) -> None:
-    with pytest.raises(RuntimeError):
+    """A `RuntimeError` of its own type, as callers such as the CLI catch
+    it, with its message unchanged."""
+    with pytest.raises(NoRouteError) as error:
         run_simulation(graph, 2)
+
+    assert isinstance(error.value, RuntimeError)
+    assert str(error.value) == (
+        "No valid route found between start and end zones."
+    )
 
 
 # --- Distance-based travel time and weather ---------------------------------
@@ -677,9 +688,11 @@ def test_the_last_turn_is_kept_at_the_turn_limit() -> None:
     weather = ScriptedWeather({1: {"start-goal": STORM}})
     simulator = Simulator(graph, 1, weather=weather)
 
-    with pytest.raises(RuntimeError, match="10000 turns"):
+    with pytest.raises(TurnLimitError) as error:
         simulator.run()
 
+    assert isinstance(error.value, RuntimeError)
+    assert str(error.value) == "Simulation exceeded 10000 turns."
     assert [result.turn_number for result in simulator.turns] == list(
         range(1, 10001)
     )
