@@ -7,7 +7,8 @@ can see why the code and tests look the way they do.
 Questions that are still open live in [open-decisions.md](open-decisions.md).
 Known defects live in [bug-triage.md](bug-triage.md).
 
-Statuses: `Accepted`, `Accepted; partly superseded by ADR-XXX`,
+Statuses: `Proposed` (under review), `Accepted`,
+`Accepted; partly superseded by ADR-XXX`,
 `Superseded by ADR-XXX`, `Deprecated`. A superseded ADR keeps its original
 text; the superseding ADR states what it replaces.
 
@@ -41,6 +42,7 @@ text; the superseding ADR states what it replaces.
 | [ADR-026](#adr-026) | Hub capacity is observed as committed load | Accepted |
 | [ADR-027](#adr-027) | Graph lookups follow a fixed contract and use a lane index | Accepted |
 | [ADR-028](#adr-028) | Lane capacity and closures are drawn only in the geographic view | Accepted |
+| [ADR-029](#adr-029) | The desktop application runs configured scenarios on the geographic maps | Proposed |
 
 ---
 
@@ -783,6 +785,9 @@ execution.
 
 - **Status:** Accepted
 - **Date:** 2026-10-04
+- **Extended by:** [ADR-029](#adr-029), which adds policy options for
+  the desktop application: its Road only mode runs without this budget.
+  The 700 km default is unchanged.
 
 **Context.** Mariia's Airlanes is primarily an air-routing system. With roads
 open in any weather ([ADR-016](#adr-016)), routing could turn a flight into
@@ -1916,3 +1921,244 @@ was.
   keeps its lanes and now has a plain background instead of Germany.
 - An air and a road lane have the same line style; the mode shows only
   through the vehicle on the lane and through closures.
+
+## ADR-029
+
+### The desktop application runs configured scenarios on the geographic maps
+
+- **Status:** Proposed
+- **Date:** 2026-10-12
+
+**Context.** Mariia's Airlanes runs one fixed scenario per map file from
+the command line: the map sets the start hub, the end hub and the number
+of aircraft. PROJECT STABLE needs a usable desktop application for Linux,
+built around the Germany and Europe maps. In it, the user configures a
+scenario and watches it in the dispatch center.
+
+The application is an additional interface. It must not replace or
+change the CLI, the original challenge maps, the Standard viewer or the
+historical benchmark baselines.
+
+The current code supports this:
+
+- The simulator takes the vehicle count as a parameter, independent of
+  the map file.
+- Terminal roles are hub flags, which capacity, admission and delivery
+  read when they need them.
+- One routing policy reaches every route search: initial planning,
+  weather replanning and deadlock resolution.
+
+A read-only study on `43ea755` measured:
+
+- **Mixed.** All 240 ordered hub pairs of Germany are reachable in clear
+  weather with the 700 km budget of [ADR-017](#adr-017).
+- **Road only.** Germany's road lanes connect 78 pairs without a budget,
+  and 74 with it.
+- **No case of Road only reaching a pair that Mixed cannot.** Mixed
+  reaches all 240 pairs, so this case does not occur on the Germany map.
+- **100 vehicles.** Runs finished without an invariant violation, a
+  deadlock or the turn limit:
+  - every reachable pair of Europe, and every reachable pair of Germany
+    in Mixed, Air only and Road only with the budget, each with one
+    weather seed;
+  - the four Germany pairs that only Road only without a budget
+    reaches, each with three weather settings.
+
+  The slowest run took 2.8 s on the development machine.
+
+These results show the design is feasible on these maps and that
+machine. They are not a performance bound.
+
+**Decision.**
+
+- **Flow.** Main menu → Germany or Europe → scenario setup → simulation
+  → results → Repeat Route or Main Menu. The application starts with
+  `python -m airlanes.app` or `make app`. The CLI keeps its entry point
+  and its behavior.
+- **Scenario.** A scenario is a map, a start hub, an end hub, a vehicle
+  count and a transport mode.
+  - The setup screen shows the map. The user picks the start and end
+    hubs by clicking existing hubs; they must be two different hubs that
+    are not blocked.
+  - The vehicle count is one number for the whole fleet, from 1 to 100,
+    default 10. A value below 1 becomes 1 and a value above 100 becomes
+    100. Empty or invalid input becomes 10. The corrected value is shown
+    before the run starts.
+  - There are no separate fleets, vehicle classes or proportions of cars
+    and aircraft.
+- **Transport modes.** A mode limits which lanes routing may use. It is
+  not a property of a vehicle; the car or aircraft shown still follows
+  the lane being travelled.
+  - **Mixed** (default): air and road lanes, with the 700 km
+    consecutive-road budget of [ADR-017](#adr-017). An air leg resets
+    the count, as it does now.
+  - **Road only**: road lanes only, without a consecutive-road budget.
+  - **Air only**: air lanes only; the road budget has no effect.
+
+  Lane capacity, hub capacity, weather, admission and every other
+  simulation rule apply in every mode. No mode creates a lane or skips
+  one that the map defines.
+
+  The setup offers a mode only when the map has lanes of more than one
+  mode. This is decided from the map's lanes, not from its file name.
+  Europe has only air lanes, so it runs as Air only, without a mode
+  selector.
+- **Routing policy.** The routing policy can restrict routing to some
+  transport modes and can run without a road budget. The default policy
+  stays as it is: all modes, 700 km. There is one road budget, 700 km,
+  both for the CLI and for Mixed; Road only switches it off. The
+  application passes the policy of the selected mode explicitly, and
+  every route search in a run uses it.
+- **Route validation.** Before a run, the setup checks the selected mode
+  for a structural route.
+  - **The check.** It uses the same routing rules as the simulator,
+    including that mode's budget, in clear weather. A lane that weather
+    closes for a while never makes a route unavailable; waiting it out
+    is the simulator's job.
+  - **When the mode has no route.** The setup tries the other modes in
+    the order Mixed, Road only, Air only, skipping the selected one, and
+    offers the first one that has a route. Mixed can fail where Road
+    only succeeds, because Road only has no road budget, so this order
+    covers that case too.
+  - **The offer.** The displayed mode changes. A message explains that
+    the selected mode cannot reach the destination and names the
+    proposed mode. The start, end and vehicle count are kept. Nothing
+    starts until the user presses Start Simulation.
+  - **When no mode has a route.** The setup asks the user to choose
+    other hubs.
+
+  The check never changes the graph and never starts a run.
+- **Messages.** Messages are short English sentences that name the hubs
+  and the modes, and say that the user must press Start Simulation. For
+  example: "No Road only route from Berlin to Munich. Mixed can reach
+  it: press Start Simulation to run in Mixed." A weather closure is
+  never described as a missing route.
+- **Fresh state.** Every run, including Repeat Route, starts from the
+  map file. The application:
+  - parses a new graph;
+  - creates new vehicles, routing state, weather and simulation state;
+  - creates a new viewer.
+
+  Map files are never written.
+- **Terminal reassignment.** The chosen hubs become the only start and
+  end hubs: their flags and the graph's references to them change
+  together. The map's own terminals become ordinary hubs, with the
+  capacity the map gives them. Committed hub load
+  ([ADR-008](#adr-008), [ADR-026](#adr-026)) and lane capacity
+  ([ADR-019](#adr-019)) work as before: only the start and end hubs are
+  unlimited.
+- **Responsibilities.** The simulation and routing layers decide routes,
+  weather, admission and events. The application configures and starts a
+  run, validates the structural route, and shows the results. It never
+  computes or changes a simulation decision.
+- **Playback and results.**
+  - **Viewer.** The application uses the existing dispatch center, with
+    pause and resume and speeds of 1×, 2× and 4×. These controls exist
+    only in the application. The CLI dispatch center, its drawing and
+    the README screenshots stay as they are.
+  - **Responsiveness.** The window stays responsive while routes and
+    results are computed.
+  - **Result.** A run ends as delivered, no route, deadlock
+    ([ADR-020](#adr-020)) or turn limit, shown as a result screen rather
+    than a traceback.
+  - **Next run.** Repeat Route runs the same configuration with new
+    weather; Main Menu starts a new configuration. Exact replay from a
+    seed remains a capability for tests and development, not a button.
+- **Distribution.** PROJECT STABLE includes a standalone Linux desktop
+  distribution with the maps and images it needs. The packaging approach
+  is chosen in M7. Docker is not the primary desktop distribution.
+
+**Rationale.**
+
+- Configuring scenarios on the existing maps exercises the simulator
+  without changing its semantics. The application adds a way to choose
+  inputs, not a second simulation.
+- Keeping the default policy, and passing the application's policy
+  explicitly, leaves the CLI, the tests and the historical benchmark
+  baselines on their current behavior.
+- One road budget avoids two meanings of Mixed. Road only is an explicit
+  choice to drive, so the fallback budget of [ADR-017](#adr-017), which
+  keeps road a fallback for flights, does not apply to it.
+- Validation with the simulator's own rules cannot disagree with the
+  run. Clear weather keeps temporary closures out of it.
+- A fresh graph for every run makes isolation structural: no state is
+  shared to reset.
+
+**Relationship to ADR-017.** [ADR-017](#adr-017) still holds unchanged:
+road is a fallback with a 700 km consecutive-road budget, the default
+policy and the Mixed mode. This decision adds two application options:
+restricting routing to one transport mode, and switching the budget off
+for Road only.
+
+**Invariants.** These existing invariants hold in every application run:
+
+- exactly one start and one end hub, consistent with the graph's
+  references; every other hub is limited by its own capacity;
+- committed hub load never exceeds a hub's capacity, and lane use never
+  exceeds a lane's capacity;
+- an aircraft in transit stays committed to its leg;
+- no run inherits terminal roles, reservations, vehicles or weather from
+  an earlier run;
+- no departure uses a lane of a mode the run's policy excludes, whether
+  from initial planning, weather replanning or deadlock resolution;
+- no route exceeds the run's road budget, when it has one;
+- the vehicle count shown is the count simulated.
+
+**Non-goals.** New hubs or lanes, a map editor, zoom, map projections and
+automatic city placement. Separate fleets, vehicle classes, proportions
+and transfers. Any change to capacity, admission, weather or deadlock
+semantics. Any change to the CLI, the Standard viewer or the original
+challenge maps.
+
+**Deferred.** A user-facing seed or exact replay, real weather, more
+maps, and a map editor.
+
+**Consequences.**
+
+- The routing policy gains options; with the default policy, behavior
+  must not change. M2 verifies this.
+- The dispatch center must return control to its caller instead of
+  ending the process, and gains controls that only the application
+  enables.
+- The application is a new presentation layer over the existing
+  simulation. A small scenario module between them configures runs.
+
+**Acceptance criteria.** Each milestone is reviewed and approved
+separately.
+
+- **M1, scenario domain.**
+  - A module without Pygame that loads a fresh graph, reassigns the
+    terminals, normalizes the vehicle count and runs a scenario to a
+    typed result.
+  - Tests cover terminal reassignment, the capacity of the former
+    terminals, the map file staying unchanged, independent repeated runs
+    and count normalization.
+- **M2, routing policy and validation.**
+  - Permitted transport modes, an optional road budget, clear-weather
+    route validation and the mode offer.
+  - With the default policy, behavior is verified to be unchanged:
+    event streams on every bundled map and historical benchmark
+    fingerprints.
+  - Tests show that no excluded lane is used, under scripted weather and
+    in deadlock resolution, and that Road only reaches Kiel → Dresden
+    (730 km of road).
+  - A synthetic map exercises Mixed → Road only, and the invariant
+    checker handles runs without a budget.
+- **M3, dispatch center lifecycle.**
+  - The dispatch center returns control to the application.
+  - The application can enable pause and speeds of 1×, 2× and 4×.
+  - The CLI, the drawing fingerprints and the screenshots are unchanged.
+- **M4, main menu and scenario setup.**
+  - Map selection, hub clicks, the vehicle count, a mode selector only
+    for maps with more than one mode, and validation messages.
+  - Headless UI tests.
+- **M5, simulation lifecycle.**
+  - Computation does not block the window.
+  - Each result status has its result screen.
+  - Repeat Route and Main Menu each start from fresh state.
+- **M6, documentation and performance.**
+  - Benchmark scenarios for the geographic maps with up to 100 vehicles.
+  - README instructions, `make app` and regression checks.
+- **M7, Linux distribution.**
+  - A standalone Linux package, chosen and recorded in its own decision.
+  - Installation and launch are tested in a clean environment.
