@@ -22,9 +22,9 @@ Storms and snow close air lanes (dashed) until the weather clears, but
 the road from Kiel to Hamburg stays open through a storm. Flights whose
 route the weather changed show `WEATHER REROUTE` on the board._
 
-![Animated dispatch center on the Europe map, turns 18 to 28: aircraft in flight across the continent, air lanes closing and reopening, and weather reroutes on the departure board](docs/images/europe-dispatch-center.gif)
+![Animated dispatch center on the Europe map, turns 15 to 25: aircraft in flight across the continent, air lanes closing and reopening, and weather reroutes on the departure board](docs/images/europe-dispatch-center.gif)
 
-_Europe, turns 18–28: aircraft cross the continent as snow and storms
+_Europe, turns 15–25: aircraft cross the continent as snow and storms
 close air lanes and others reopen, and the board lists flights on a
 weather reroute._
 
@@ -55,11 +55,11 @@ regenerated with `make screenshots` (see [Development](#development)).
 
 ## A closer look
 
-![Dispatch center on the Europe map at turn 27: clear, rain, tailwind, snow and storm lanes at once, closed lanes dashed, and two flights on a weather reroute to Oslo](docs/images/europe-simulation.png)
+![Dispatch center on the Europe map at turn 22: clear, rain, tailwind, snow and storm lanes at once, closed lanes dashed, and two flights on a weather reroute to London](docs/images/europe-simulation.png)
 
-_Europe, turn 27: all five weather conditions at once. Clear lanes are
+_Europe, turn 22: all five weather conditions at once. Clear lanes are
 gray, rain blue, tailwind green; snow and storm close their air lanes,
-drawn dashed. The two flights on a weather reroute to Oslo are the group
+drawn dashed. The two flights on a weather reroute to London are the group
 marked 2 on the lane from Reykjavik._
 
 ![Detail of the Germany map at turn 9: cars on road lanes from Kiel, Hamburg and Berlin, wider road lanes beside narrower air lanes, and the air lane from Hanover to Erfurt closed by a storm](docs/images/germany-detail.png)

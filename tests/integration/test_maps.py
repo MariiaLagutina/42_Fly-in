@@ -6,14 +6,23 @@ original assignment, never against the current algorithm's exact result, so
 better routing never breaks these tests. Routes are not asserted.
 """
 
+from itertools import permutations
 from pathlib import Path
 import random
 
 import pytest
 
-from airlanes.events import AgentRerouted
+from airlanes.events import AgentMoved, AgentRerouted, WeatherChanged
 from airlanes.mapfile import Parser
-from airlanes.world.weather import RandomWeather
+from airlanes.model.graph import Graph
+from airlanes.model.transport_mode import TransportMode
+from airlanes.routing.pathfinder import Pathfinder
+from airlanes.world.weather import (
+    RandomWeather,
+    ScriptedWeather,
+    WeatherCondition,
+    WeatherState,
+)
 
 from tests.support.simulation import (
     SimulationRun,
@@ -154,3 +163,102 @@ def test_weather_does_not_touch_global_random() -> None:
     simulate(WEATHER_MAPS[0], weather_seed=0)
 
     assert random.getstate() == saved
+
+
+@pytest.mark.parametrize("relative_path", WEATHER_MAPS)
+def test_every_hub_reaches_every_other_hub(relative_path: str) -> None:
+    """The geographic maps are connected: in clear weather, routing finds a
+    route from every hub to every other one. Milan had no lanes, so no
+    route on the Europe map started or ended there."""
+    graph, _ = Parser().parse(str(MAPS_DIR / relative_path))
+    pathfinder = Pathfinder(graph)
+
+    unreachable = [
+        (start.name, end.name)
+        for start, end in permutations(graph.zones.values(), 2)
+        if pathfinder.find_route(start, end, WeatherState()) is None
+    ]
+
+    assert unreachable == []
+
+
+EUROPE = "bonus/europa_map.txt"
+
+
+def test_milan_is_joined_to_zurich_by_one_air_lane() -> None:
+    graph, _ = Parser().parse(str(MAPS_DIR / EUROPE))
+    milan, zurich = graph.zones["Milan"], graph.zones["Zurich"]
+
+    lanes = [lane for lane in graph.connections if lane.connects(milan)]
+
+    assert [lane.name() for lane in lanes] == ["Zurich-Milan"]
+    lane = lanes[0]
+    assert lane.mode is TransportMode.AIR
+    assert lane.distance == 220
+    assert lane.max_link_capacity == 1
+    assert graph.get_neighbors(milan) == [zurich]
+    assert milan in graph.get_neighbors(zurich)
+
+
+def with_terminals(graph: Graph, start: str, end: str) -> Graph:
+    """The parsed graph with other start and end hubs. The map's own
+    terminals become ordinary hubs with their map capacity."""
+    for zone in graph.zones.values():
+        zone.is_start = zone.name == start
+        zone.is_end = zone.name == end
+    graph.start_zone = graph.zones[start]
+    graph.end_zone = graph.zones[end]
+    return graph
+
+
+@pytest.mark.parametrize("seed", [None, 0])
+@pytest.mark.parametrize(
+    ("start", "end"),
+    [("Milan", "Athens"), ("Reykjavik", "Milan")],
+    ids=["from-milan", "to-milan"],
+)
+def test_aircraft_fly_from_and_to_milan(
+    start: str, end: str, seed: int | None
+) -> None:
+    graph, nb_aircraft = Parser().parse(str(MAPS_DIR / EUROPE))
+    graph = with_terminals(graph, start, end)
+    weather = RandomWeather(graph, seed=seed) if seed is not None else None
+
+    run = run_simulation(graph, nb_aircraft, weather=weather)
+
+    assert check_invariants(run) == []
+    assert all(drone.is_delivered() for drone in run.simulator.drones)
+    assert all(
+        drone.current_zone.name == end for drone in run.simulator.drones
+    )
+
+
+def test_a_storm_closes_the_milan_lane_until_it_clears() -> None:
+    """A closed lane is a weather state of a lane that exists: aircraft for
+    Milan wait in Zurich and fly once it reopens."""
+    graph, _ = Parser().parse(str(MAPS_DIR / EUROPE))
+    graph = with_terminals(graph, "Zurich", "Milan")
+    weather = ScriptedWeather(
+        {
+            1: {"Zurich-Milan": WeatherCondition.STORM},
+            4: {"Zurich-Milan": WeatherCondition.CLEAR},
+        }
+    )
+
+    run = run_simulation(graph, 3, weather=weather)
+
+    assert check_invariants(run) == []
+    changes = [
+        (e.turn_number, e.is_open)
+        for e in run.events
+        if isinstance(e, WeatherChanged)
+        and e.connection_name == "Zurich-Milan"
+    ]
+    assert changes == [(1, False), (4, True)]
+    arrivals = [
+        e.turn_number
+        for e in run.events
+        if isinstance(e, AgentMoved) and e.destination == "Milan"
+    ]
+    assert len(arrivals) == 3
+    assert min(arrivals) >= 4
