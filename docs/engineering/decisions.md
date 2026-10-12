@@ -40,6 +40,7 @@ text; the superseding ADR states what it replaces.
 | [ADR-025](#adr-025) | The map format is strict: missing input takes a default, invalid input is an error | Accepted |
 | [ADR-026](#adr-026) | Hub capacity is observed as committed load | Accepted |
 | [ADR-027](#adr-027) | Graph lookups follow a fixed contract and use a lane index | Accepted |
+| [ADR-028](#adr-028) | Lane capacity and closures are drawn only in the geographic view | Accepted |
 
 ---
 
@@ -1847,3 +1848,71 @@ written contract before their implementation could change.
   lane, paid while parsing.
 - `find_route` still scans `graph.connections` itself and is unchanged.
 
+## ADR-028
+
+### Lane capacity and closures are drawn only in the geographic view
+
+- **Status:** Accepted
+- **Date:** 2026-10-12
+
+**Context.** Neither Pygame viewer showed a lane's capacity. Capacity
+varies only on the Germany and Europe maps; every lane of the original
+challenge maps has capacity 1. The dispatch center coloured lanes by
+weather but drew a lane closed by a storm like an open road in the same
+storm, and chose its background by looking for "europa" in `sys.argv`, so
+every other map, a challenge map included, was drawn over Germany. The
+standard turn viewer is the original assignment's view and stays as it
+was.
+
+**Decision.**
+
+- **Geographic view only.** Lane styling lives in
+  `airlanes/output/pygame/lanes.py`. The dispatch center uses it only for a
+  map with a geographic view: `GEOGRAPHIC_MAPS` names, by map file name,
+  the `MapView` of Germany and Europe. Any other map in the dispatch
+  center keeps its original lanes, coloured by weather. The style never
+  follows the map's size or capacities. The standard viewer keeps its
+  drawing: lane colours, widths, white edges, the 6 px offset, active
+  lanes and hubs.
+- **Capacity.** Width by capacity class: 3 px for 1, 4 px for 2–3, 5 px
+  for 4–6 and 7+. Within each weather colour family the shade deepens with
+  the class, so 7+ differs from 4–6 by shade only.
+- **Weather and closure.** The colour family is the lane's weather. A lane
+  is dashed while the last `WeatherChanged` for it reported `is_open`
+  false; every lane starts open. The view does not repeat the weather
+  rules.
+- **Legibility.** Every lane has a 1 px dark outline. Wider lanes are
+  drawn first, and all outlines before any lane colour. Lanes joining the
+  same two hubs are spread symmetrically; a single lane joins the hub
+  centres.
+- **Background.** `AirlinesWindow` takes its view explicitly, and a
+  `MapView` names its background image. A map without a view gets a plain
+  background.
+
+**Rationale.**
+
+- An explicit list of geographic maps keeps the challenge maps exactly as
+  they were, in both viewers. A rule based on hub count or capacities
+  would change silently with a new map.
+- Width alone cannot separate 4–6 from 7+ within a 5 px limit; shade can.
+  Snow stays in pale shades and rain in deep ones, because the two blues
+  differ only in lightness. Clear and tailwind avoid the lightness of the
+  Germany land. Measured against that land, the clear shade of capacity
+  2–3 had a contrast ratio of 1.09 before this adjustment.
+- A light outline made lanes look hollow and hid snow; a translucent one
+  lost the storm lane on the red and pink countries of the Europe map.
+- Closure comes from the event the simulator already emits, so the view
+  cannot disagree with the simulation.
+
+**Consequences.**
+
+- Every frame of the standard viewer on all twelve bundled maps is
+  pixel-identical to the Stage 9b base (207 frames). Tests pin the lines
+  and circles that the standard viewer and the dispatch center draw on the
+  ten original challenge maps.
+- Simulation behaviour is unchanged: event streams, turn results, capacity
+  snapshots, CLI and text output, parsing, and benchmark fingerprints.
+- The dispatch center draws Germany and Europe differently. Any other map
+  keeps its lanes and now has a plain background instead of Germany.
+- An air and a road lane have the same line style; the mode shows only
+  through the vehicle on the lane and through closures.

@@ -14,9 +14,22 @@ written from scratch in Python. On top of the routing core, the project adds
 an aviation layer: real maps of Germany and Europe, distance-based road and
 air legs, live weather, and a Pygame dispatch center.
 
-![Dispatch center on the Europe map: aircraft en route, storms and snow on air lanes, weather alerts and a departure board](docs/images/europe-simulation.png)
+![Animated dispatch center on the Germany map, turns 3 to 13: cars drive the road lanes, aircraft move from hub to hub, air lanes close and reopen with the weather, and the departure board marks weather reroutes](docs/images/germany-dispatch-center.gif)
 
-![Dispatch center on the Germany map: aircraft and a car on a road leg, snow and rain on lanes, and the departure board](docs/images/germany-simulation.png)
+_Germany, turns 3–13, one frame per turn. Cars drive the roads while
+aircraft move from hub to hub; most air legs here take a single turn.
+Storms and snow close air lanes (dashed) until the weather clears, but
+the road from Kiel to Hamburg stays open through a storm. Flights whose
+route the weather changed show `WEATHER REROUTE` on the board._
+
+![Animated dispatch center on the Europe map, turns 18 to 28: aircraft in flight across the continent, air lanes closing and reopening, and weather reroutes on the departure board](docs/images/europe-dispatch-center.gif)
+
+_Europe, turns 18–28: aircraft cross the continent as snow and storms
+close air lanes and others reopen, and the board lists flights on a
+weather reroute._
+
+Both animations and the screenshots below are replays of seeded runs,
+regenerated with `make screenshots` (see [Development](#development)).
 
 ## Highlights
 
@@ -34,10 +47,35 @@ air legs, live weather, and a Pygame dispatch center.
   aircraft; roads stay open but get slower.
 - **Real maps.** Germany (16 hubs) and Europe (24 hubs) with real city names,
   populations, and distances.
-- **Aviation dispatch center.** A Pygame interface with a geographic map,
-  departure board, weather alerts, and a replayable timeline.
+- **Aviation dispatch center.** A Pygame interface with a geographic map
+  whose lanes show capacity, weather, and closures, a departure board,
+  weather alerts, and a replayable timeline.
 - **Event-driven core.** The simulation emits typed events; every output mode,
   from plain text to Pygame, is a listener on the same event stream.
+
+## A closer look
+
+![Dispatch center on the Europe map at turn 27: clear, rain, tailwind, snow and storm lanes at once, closed lanes dashed, and two flights on a weather reroute to Oslo](docs/images/europe-simulation.png)
+
+_Europe, turn 27: all five weather conditions at once. Clear lanes are
+gray, rain blue, tailwind green; snow and storm close their air lanes,
+drawn dashed. The two flights on a weather reroute to Oslo are the group
+marked 2 on the lane from Reykjavik._
+
+![Detail of the Germany map at turn 9: cars on road lanes from Kiel, Hamburg and Berlin, wider road lanes beside narrower air lanes, and the air lane from Hanover to Erfurt closed by a storm](docs/images/germany-detail.png)
+
+_Germany, turn 9 of the animation, at full size: cars on the roads from
+Kiel to Hamburg, Hamburg to Hanover, and Berlin to Dresden, in the rain.
+The roads hold three vehicles and are drawn 4 px wide; the air lanes hold
+one and are drawn 3 px wide. The storm has closed the air lane from
+Hanover to Erfurt._
+
+![Standard turn viewer on the challenger map at turn 24: aircraft spread over parallel routes, lanes in use by multi-turn legs in blue, and the turn's movements above the map](docs/images/challenger-turn-viewer.png)
+
+_The challenger map at turn 24 in the standard turn viewer, the original
+assignment's view: aircraft spread over parallel routes, blue lanes carry
+legs that take more than one turn, and the turn's movements are listed
+above the map._
 
 ## Quick start
 
@@ -215,11 +253,14 @@ Weather is random and not seeded, so two runs of the same map can differ.
 
 `--pygame-airlines` opens an air-traffic-control style view:
 
-- geographic background for the Germany and Europe maps
-- cities sized and colored by population
+- geographic background for the Germany and Europe maps, and a plain one
+  for other maps
+- cities colored by population
 - airplanes on air legs and cars on road legs, outlined with `pygame.mask` so
   they stay readable on the map
-- lanes colored by current weather, with weather icons
+- on the Germany and Europe maps, lanes that show capacity, weather, and
+  closures (see below); on other maps, lanes colored by weather. Both with
+  weather icons
 - a departure board with a flight number and status for every aircraft:
   `EN ROUTE` on an air leg, `DRIVING` on a road leg, `WEATHER REROUTE` on
   the first leg after weather changed the route, and, at an intermediate
@@ -239,6 +280,26 @@ forwards through time.
 | `R` | Reset to turn 0 |
 
 The standard viewer (`--pygame`) uses the same controls.
+
+### Reading the map
+
+On the Germany and Europe maps, each line style in the dispatch center
+answers one question:
+
+| Question | How the lane shows it |
+| --- | --- |
+| How many aircraft can use it at once? | Width: 3 px for capacity 1, 4 px for 2–3, 5 px for 4–6 and for 7 or more. Within its color, a larger capacity is a deeper shade, which alone sets 7+ apart from 4–6 |
+| What is the weather? | Color: gray clear, red storm, pale blue snow, blue rain, green tailwind, with an icon on lanes that are not clear |
+| Can a leg start on it? | A dashed lane is closed: the simulator reported that its weather closes it, as storm and snow do on air lanes. A road in the same weather stays solid |
+| Air or road? | No line style of its own: an airplane flies an air leg, a car drives a road leg |
+
+Every lane has a thin dark outline, so pale and deep shades stay visible on
+both land and sea. Wider lanes are drawn first, so narrower ones stay
+visible where they cross.
+
+The standard viewer keeps the drawing of the original assignment: dark
+lanes with a white edge, and a wider blue lane while an aircraft is on a
+leg that takes more than one turn. It does not show capacity or weather.
 
 ## Map format
 
@@ -383,12 +444,43 @@ make clean         # remove caches, coverage data, and the virtual environment
 `make check` or CI. Method and results are in
 [docs/engineering/performance-benchmark.md](docs/engineering/performance-benchmark.md).
 
+`make screenshots` regenerates the README screenshots and animations in
+`docs/images`. It replays seeded runs headless, with fixed flight numbers,
+and saves the window surface without a window frame: one turn per
+screenshot, or one frame per consecutive turn for an animated GIF, written
+with Pillow from the development dependencies. Two runs on the same
+machine give identical files; fonts come from the system, so another
+machine may render text slightly differently.
+
 Dependencies are declared in `pyproject.toml` and pinned in `uv.lock`. All
 `make` targets run with `--locked`, so they never modify `uv.lock`. After
 changing dependencies, run `uv lock`, review the diff, and commit both files.
 
 Changes reach `main` only through pull requests, and every pull request is
 squash-merged into a single commit.
+
+## Engineering
+
+- **Tests.** A pytest suite of unit and integration tests, including
+  headless Pygame tests and regression tests that pin the standard
+  viewer's drawing and the content of each README screenshot.
+- **CI.** A GitHub Actions workflow
+  ([ci.yml](.github/workflows/ci.yml)) runs flake8, `mypy --strict`, and the
+  tests on Python 3.14 for every pull request and every push to `main`.
+- **Typing.** All sources and tests pass `mypy --strict`.
+- **Decisions.** Design decisions are recorded as ADRs in
+  [docs/engineering/decisions.md](docs/engineering/decisions.md); questions
+  still open are in
+  [docs/engineering/open-decisions.md](docs/engineering/open-decisions.md).
+- **Bugs.** [docs/engineering/bug-triage.md](docs/engineering/bug-triage.md)
+  records each bug found, its cause, its fix, and its status.
+- **Performance.** A reproducible benchmark measures planning and turn
+  costs on synthetic and bundled maps. Indexing lanes by hub made median
+  runs 4.2–4.5× faster on the synthetic graph-size, lane-density, and
+  aircraft sweeps, up to 12.5× at 400 hubs, and lowered the growth exponent
+  against lanes from 1.95 to 1.12. Bundled maps gained less (median
+  1.26×). Simulation results stayed byte-identical. Details are in
+  [docs/engineering/performance-benchmark.md](docs/engineering/performance-benchmark.md#stage-8b-lane-index).
 
 ## Background
 

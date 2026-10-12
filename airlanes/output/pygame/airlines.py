@@ -1,4 +1,6 @@
+from dataclasses import dataclass
 import math
+from pathlib import Path
 import random
 import string
 import sys
@@ -29,6 +31,35 @@ from airlanes.output.pygame.common import (
     IMG_DIR,
     Point,
 )
+from airlanes.output.pygame.lanes import (
+    LaneStroke,
+    draw_lanes,
+    lane_color,
+    lane_width,
+    offset_line,
+    parallel_offsets,
+)
+
+
+@dataclass(frozen=True)
+class MapView:
+    """How the dispatch center draws a bundled geographic map: over its
+    background image, with lane capacity and closures (ADR-028)."""
+    background: str
+
+
+# The bundled geographic maps, by map file name. Hub coordinates of these
+# maps are drawn on their image. Any other map keeps the original lane
+# drawing on the plain dispatch-center background.
+GEOGRAPHIC_MAPS = {
+    "europa_map.txt": MapView("europa.png"),
+    "germany_map.txt": MapView("germany.png"),
+}
+
+
+def view_for(map_path: str | Path) -> Optional[MapView]:
+    """The geographic view of a map file, or None for any other map."""
+    return GEOGRAPHIC_MAPS.get(Path(map_path).name)
 
 
 class FlightInfo(TypedDict):
@@ -55,9 +86,16 @@ class AirlinesWindow:
     COLOR_OVERLAY_BORDER = (80, 95, 115)
     COLOR_MUTED_DARK = (100, 110, 120)
 
-    def __init__(self, visualizer: PygameAirlinesVisualizer) -> None:
+    def __init__(
+        self,
+        visualizer: PygameAirlinesVisualizer,
+        view: Optional[MapView] = None,
+    ) -> None:
+        """`view` is the geographic view of a bundled map; None draws the
+        original lanes on the plain dispatch-center background."""
         self.visualizer = visualizer
         self.graph = visualizer.graph
+        self.view = view
 
         self._setup_layout()
         self._setup_pygame()
@@ -130,6 +168,9 @@ class AirlinesWindow:
         self.current_turn = 0
         self.drone_positions: dict[str, DroneDisplayPosition] = {}
         self.connection_weather: dict[str, str] = {}
+        # Whether each lane accepts new departures, as the simulator
+        # reported with its last weather change. Every lane starts open.
+        self.connection_open: dict[str, bool] = {}
         # A weather reroute happens at a hub, before the aircraft departs
         # on the new route. The aircraft stays pending until its next
         # departure; a multi-turn departure then becomes a weather-rerouted
@@ -175,12 +216,10 @@ class AirlinesWindow:
         return f"{population//1000}K"
 
     def _load_background(self) -> Optional[pygame.surface.Surface]:
-        bg_image_name = "germany.png"
-        for arg in sys.argv:
-            if "europa" in arg.lower():
-                bg_image_name = "europa.png"
+        if self.view is None:
+            return None
         try:
-            bg = pygame.image.load(IMG_DIR / bg_image_name)
+            bg = pygame.image.load(IMG_DIR / self.view.background)
             return pygame.transform.scale(bg, (self.map_width, self.height))
         except FileNotFoundError:
             return None
@@ -252,6 +291,7 @@ class AirlinesWindow:
                 self.weather_reroute_pending.discard(event.agent_label)
         elif isinstance(event, WeatherChanged):
             self.connection_weather[event.connection_name] = event.condition
+            self.connection_open[event.connection_name] = event.is_open
         elif isinstance(event, CapacitySnapshot):
             self.hub_load = {
                 name: (load, capacity)
@@ -282,6 +322,8 @@ class AirlinesWindow:
     def _weather_style(
         self, condition: str
     ) -> tuple[tuple[int, int, int], int]:
+        """Colour and width of a lane in the original drawing; the colour
+        is also that of the condition's weather alert."""
         if condition == "storm":
             return UIColors.RED, 4
         if condition == "snow":
@@ -303,7 +345,63 @@ class AirlinesWindow:
             icon_rect = self.icons[condition].get_rect(center=(mid_x, mid_y))
             self.screen.blit(self.icons[condition], icon_rect)
 
+    def _lane_strokes(self) -> list[LaneStroke]:
+        """
+        One stroke per connection, between the hub centres. Width and
+        colour depth show the lane's capacity; the colour family shows its
+        weather; a lane the simulator reported closed is dashed. Lanes
+        between the same two hubs are spread symmetrically around the line
+        between them.
+        """
+        pairs: dict[tuple[str, str], list[Connection]] = {}
+        for connection in self.graph.connections:
+            pair = (connection.zone_a, connection.zone_b)
+            # Measure offsets from one fixed end of the pair, so lanes
+            # listed in either direction still spread apart.
+            first, second = sorted(pair, key=lambda zone: zone.name)
+            pairs.setdefault((first.name, second.name), []).append(
+                connection
+            )
+
+        strokes = []
+        for (first_name, second_name), lanes in pairs.items():
+            first = self.graph.zones[first_name]
+            second = self.graph.zones[second_name]
+            for connection, offset in zip(
+                lanes, parallel_offsets(len(lanes))
+            ):
+                start, end = offset_line(
+                    (first.x, first.y), (second.x, second.y), offset
+                )
+                condition = self.connection_weather.get(
+                    connection.name(), "clear"
+                )
+                capacity = connection.max_link_capacity
+                strokes.append(
+                    LaneStroke(
+                        start,
+                        end,
+                        lane_color(condition, capacity),
+                        lane_width(capacity),
+                        closed=not self.connection_open.get(
+                            connection.name(), True
+                        ),
+                    )
+                )
+        return strokes
+
     def _draw_weather_connections(self) -> None:
+        if self.view is None:
+            self._draw_original_connections()
+            return
+        draw_lanes(self.screen, self._lane_strokes())
+        for connection in self.graph.connections:
+            condition = self.connection_weather.get(connection.name(), "clear")
+            self._draw_weather_icon(connection, condition)
+
+    def _draw_original_connections(self) -> None:
+        """Lanes of a map without a geographic view: coloured by weather
+        only, as before the geographic lane styling."""
         for connection in self.graph.connections:
             start = (connection.zone_a.x, connection.zone_a.y)
             end = (connection.zone_b.x, connection.zone_b.y)
@@ -638,6 +736,19 @@ class AirlinesWindow:
         y = self._draw_weather_alerts(y)
         self._draw_live_departures(y)
 
+    def draw(self) -> None:
+        """Draw the replayed turn back to front: background, lanes and
+        cities, vehicles, controls, sidebar."""
+        self.screen.fill(self.COLOR_OVERLAY_BG)
+
+        if self.bg_image:
+            self.screen.blit(self.bg_image, (0, 0))
+
+        self._draw_map()
+        self._draw_drones()
+        self._draw_map_controls()
+        self._draw_sidebar()
+
     def run_loop(self) -> None:
         running = True
         while running:
@@ -682,16 +793,7 @@ class AirlinesWindow:
                 else:
                     self.is_playing = False
 
-            self.screen.fill(self.COLOR_OVERLAY_BG)
-
-            if self.bg_image:
-                self.screen.blit(self.bg_image, (0, 0))
-
-            self._draw_map()
-            self._draw_drones()
-            self._draw_map_controls()
-            self._draw_sidebar()
-
+            self.draw()
             pygame.display.flip()
             self.clock.tick(UIConstants.FPS)
 
@@ -699,6 +801,8 @@ class AirlinesWindow:
         sys.exit()
 
 
-def run_pygame_airlines(visualizer: PygameAirlinesVisualizer) -> None:
-    window = AirlinesWindow(visualizer)
+def run_pygame_airlines(
+    visualizer: PygameAirlinesVisualizer, view: Optional[MapView] = None
+) -> None:
+    window = AirlinesWindow(visualizer, view)
     window.run_loop()
