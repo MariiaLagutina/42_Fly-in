@@ -42,7 +42,7 @@ text; the superseding ADR states what it replaces.
 | [ADR-026](#adr-026) | Hub capacity is observed as committed load | Accepted |
 | [ADR-027](#adr-027) | Graph lookups follow a fixed contract and use a lane index | Accepted |
 | [ADR-028](#adr-028) | Lane capacity and closures are drawn only in the geographic view | Accepted |
-| [ADR-029](#adr-029) | The desktop application runs configured scenarios on the geographic maps | Proposed |
+| [ADR-029](#adr-029) | The desktop application runs configured scenarios on the geographic maps | Accepted |
 
 ---
 
@@ -1926,7 +1926,7 @@ was.
 
 ### The desktop application runs configured scenarios on the geographic maps
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-10-12
 
 **Context.** Mariia's Airlanes runs one fixed scenario per map file from
@@ -1986,9 +1986,11 @@ machine. They are not a performance bound.
     before the run starts.
   - There are no separate fleets, vehicle classes or proportions of cars
     and aircraft.
-- **Transport modes.** A mode limits which lanes routing may use. It is
-  not a property of a vehicle; the car or aircraft shown still follows
-  the lane being travelled.
+- **Transport modes.** A mode filters which of the map's existing lanes
+  routing may use. It does not add, remove or change any connection in
+  the graph: every lane stays in the graph and in the view, and weather
+  still acts on it. A mode is not a property of a vehicle; the car or
+  aircraft shown still follows the lane being travelled.
   - **Mixed** (default): air and road lanes, with the 700 km
     consecutive-road budget of [ADR-017](#adr-017). An air leg resets
     the count, as it does now.
@@ -2028,11 +2030,13 @@ machine. They are not a performance bound.
     other hubs.
 
   The check never changes the graph and never starts a run.
-- **Messages.** Messages are short English sentences that name the hubs
-  and the modes, and say that the user must press Start Simulation. For
-  example: "No Road only route from Berlin to Munich. Mixed can reach
-  it: press Start Simulation to run in Mixed." A weather closure is
-  never described as a missing route.
+- **Messages.** Messages are short English sentences built from the
+  scenario: they name the hubs and the modes, say that the mode has
+  changed, and say that the user must press Start Simulation. For
+  example, with the selected hubs filled in: "Road only has no route
+  from Berlin to Munich. Mode changed to Mixed. Press Start Simulation
+  to run." No hub pair is written into the application. A weather
+  closure is never described as a missing route.
 - **Fresh state.** Every run, including Repeat Route, starts from the
   map file. The application:
   - parses a new graph;
@@ -2079,8 +2083,12 @@ machine. They are not a performance bound.
 - One road budget avoids two meanings of Mixed. Road only is an explicit
   choice to drive, so the fallback budget of [ADR-017](#adr-017), which
   keeps road a fallback for flights, does not apply to it.
-- Validation with the simulator's own rules cannot disagree with the
-  run. Clear weather keeps temporary closures out of it.
+- Validation uses the simulator's own routing constraints, so it
+  declares a route structurally available only if the simulator could
+  plan it. Clear weather keeps temporary closures out of the check.
+  Passing it does not guarantee delivery: later weather and traffic can
+  still delay the run, and it can still end in a deadlock or at the turn
+  limit. The result screen reports how it ended.
 - A fresh graph for every run makes isolation structural: no state is
   shared to reset.
 
