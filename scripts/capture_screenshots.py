@@ -76,7 +76,7 @@ GERMANY = "maps/bonus/germany_map.txt"
 EUROPE = "maps/bonus/europa_map.txt"
 
 SHOTS = (
-    Shot("europe-simulation.png", EUROPE, 27, 1),
+    Shot("europe-simulation.png", EUROPE, 22, 25),
     # A crop of the Germany animation's turn 9, around Hamburg and Berlin.
     Shot("germany-detail.png", GERMANY, 9, 46, crop=(360, 70, 480, 400)),
     Shot(
@@ -89,7 +89,7 @@ SHOTS = (
 
 ANIMATIONS = (
     Animation("germany-dispatch-center.gif", GERMANY, 46, 3, 13),
-    Animation("europe-dispatch-center.gif", EUROPE, 1, 18, 28),
+    Animation("europe-dispatch-center.gif", EUROPE, 59, 15, 25),
 )
 
 # Display time of each turn, and of the last turn before the loop starts

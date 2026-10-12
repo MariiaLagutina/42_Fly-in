@@ -601,11 +601,16 @@ type is ignored: entering a restricted hub takes as long as entering a
 normal one. This is documented in the README and asserted by a transport
 test, so that a change is a deliberate decision.
 
-**Evidence from the Weather-aware cost audit.**
+**Evidence from the Weather-aware cost audit.** Gathered before the
+Europe map joined Milan to Zurich; the measurements below are of that
+map.
 
 - The bonus maps contain three restricted hubs: Saarbrucken (Germany),
-  Zurich and Milan (Europe). Milan has no lanes, so two restricted hubs are
-  reached by distance lanes.
+  Zurich and Milan (Europe). At the audit, Milan had no lanes, so two
+  restricted hubs were reached by distance lanes. Milan now has one, an
+  air lane from Zurich, so all three are. Milan has no other lane, so no
+  route passes through it: only a route that ends there enters it, and
+  the map's own start and end hubs are elsewhere.
 - The Europe map describes its restricted hubs as "Crossing the Alps is
   slow (restricted)". The current behavior does not make them slower.
 - No initial plan on the bundled maps passes through a restricted hub: 0 of
