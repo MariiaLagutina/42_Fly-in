@@ -1,15 +1,24 @@
-"""Scenario graphs: chosen start and end hubs on a fresh graph (ADR-029)."""
+"""Scenarios (ADR-029): chosen start and end hubs on a fresh graph, and the
+vehicle count."""
 
 import hashlib
 import math
 from pathlib import Path
+import sys
 
 import pytest
 
 from airlanes.events import CapacitySnapshot
 from airlanes.mapfile import Parser
 from airlanes.model.graph import Graph
-from airlanes.scenario import ScenarioError, load_scenario_graph
+from airlanes.scenario import (
+    DEFAULT_VEHICLE_COUNT,
+    MAX_VEHICLE_COUNT,
+    MIN_VEHICLE_COUNT,
+    ScenarioError,
+    load_scenario_graph,
+    normalize_vehicle_count,
+)
 
 from tests.support.simulation import check_invariants, run_simulation
 
@@ -178,3 +187,93 @@ def test_a_hub_between_the_map_terminals_can_be_chosen(
     graph = load_scenario_graph(map_file, "b", "a")
 
     assert terminals(graph) == (["b"], ["a"])
+
+
+# --- Vehicle count -----------------------------------------------------------
+
+
+def test_the_vehicle_count_limits() -> None:
+    assert (DEFAULT_VEHICLE_COUNT, MIN_VEHICLE_COUNT, MAX_VEHICLE_COUNT) == (
+        10, 1, 100
+    )
+
+
+@pytest.mark.parametrize(
+    ("value", "count"),
+    [
+        ("1", 1),
+        ("10", 10),
+        ("25", 25),
+        ("99", 99),
+        ("100", 100),
+        ("007", 7),
+        (" 25 ", 25),
+        ("\t42\n", 42),
+    ],
+)
+def test_a_count_in_range_is_kept(value: str, count: int) -> None:
+    assert normalize_vehicle_count(value) == count
+
+
+@pytest.mark.parametrize(
+    ("value", "count"),
+    [
+        ("0", 1),
+        ("-0", 1),
+        ("-1", 1),
+        ("-5", 1),
+        (" -5 ", 1),
+        ("101", 100),
+        ("999999", 100),
+        ("99999999999999999999999", 100),
+    ],
+)
+def test_a_count_out_of_range_is_clamped(value: str, count: int) -> None:
+    assert normalize_vehicle_count(value) == count
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "",
+        " ",
+        "abc",
+        "7.5",
+        "1e2",
+        "+5",
+        "-",
+        "--5",
+        "5 5",
+        "0x10",
+        "1_000",
+        "10 drones",
+        "١٢",  # Arabic-Indic digits
+        "１２",  # fullwidth digits
+        "²",  # superscript two
+    ],
+)
+def test_empty_or_invalid_input_gives_the_default(value: str) -> None:
+    assert normalize_vehicle_count(value) == 10
+
+
+# Longer than Python's limit on converting a string to an integer, which
+# `int` enforces with a ValueError; 4300 digits unless configured.
+LONG = max(sys.get_int_max_str_digits(), 4300) + 1
+
+
+@pytest.mark.parametrize(
+    ("value", "count"),
+    [
+        ("9" * LONG, 100),
+        ("1" + "0" * LONG, 100),
+        (" " + "9" * LONG + " ", 100),
+        ("-" + "9" * LONG, 1),
+        ("-" + "0" * LONG, 1),
+        ("0" * LONG, 1),
+        ("0" * LONG + "42", 42),
+        ("0" * LONG + "100", 100),
+        ("0" * LONG + "101", 100),
+    ],
+)
+def test_a_count_of_any_length_is_normalized(value: str, count: int) -> None:
+    assert normalize_vehicle_count(value) == count
