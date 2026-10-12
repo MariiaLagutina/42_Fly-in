@@ -1,5 +1,5 @@
-"""Scenarios (ADR-029): chosen start and end hubs on a fresh graph, and the
-vehicle count."""
+"""Scenarios (ADR-029): chosen start and end hubs on a fresh graph, the
+vehicle count, and runs with typed results."""
 
 import hashlib
 from itertools import permutations
@@ -9,7 +9,13 @@ import sys
 
 import pytest
 
-from airlanes.events import CapacitySnapshot
+from airlanes import scenario
+from airlanes.events import (
+    AgentMoved,
+    CapacitySnapshot,
+    TurnFinished,
+    TurnStarted,
+)
 from airlanes.mapfile import Parser
 from airlanes.model.graph import Graph
 from airlanes.scenario import (
@@ -17,11 +23,23 @@ from airlanes.scenario import (
     MAX_VEHICLE_COUNT,
     MIN_VEHICLE_COUNT,
     ScenarioError,
+    ScenarioResult,
+    ScenarioStatus,
     load_scenario_graph,
     normalize_vehicle_count,
+    run_scenario,
+)
+from airlanes.world.weather import (
+    RandomWeather,
+    ScriptedWeather,
+    WeatherCondition,
 )
 
-from tests.support.simulation import check_invariants, run_simulation
+from tests.support.simulation import (
+    EventRecorder,
+    check_invariants,
+    run_simulation,
+)
 
 MAPS_DIR = Path(__file__).resolve().parents[2] / "maps"
 GERMANY = MAPS_DIR / "bonus" / "germany_map.txt"
@@ -353,3 +371,219 @@ LONG = max(sys.get_int_max_str_digits(), 4300) + 1
 )
 def test_a_count_of_any_length_is_normalized(value: str, count: int) -> None:
     assert normalize_vehicle_count(value) == count
+
+
+# --- Running a scenario ------------------------------------------------------
+
+
+def test_a_scenario_is_delivered() -> None:
+    result = run_scenario(GERMANY, "Berlin", "Munich", 10, weather_seed=0)
+
+    assert result.status is ScenarioStatus.DELIVERED
+    assert (result.delivered, result.vehicles) == (10, 10)
+    assert [turn.turn_number for turn in result.turns] == list(
+        range(1, len(result.turns) + 1)
+    )
+    assert result.message == (
+        f"Delivered in {len(result.turns)} turns. "
+        "10 of 10 vehicles reached Munich."
+    )
+
+
+@pytest.mark.parametrize("vehicles", [MIN_VEHICLE_COUNT, MAX_VEHICLE_COUNT])
+def test_the_vehicle_count_limits_can_be_run(vehicles: int) -> None:
+    result = run_scenario(GERMANY, "Berlin", "Munich", vehicles, 0)
+
+    assert result.status is ScenarioStatus.DELIVERED
+    assert result.delivered == vehicles
+
+
+def test_one_vehicle_is_one_vehicle_in_the_message() -> None:
+    result = run_scenario(GERMANY, "Kiel", "Hamburg", 1, weather_seed=0)
+
+    assert result.message.endswith(" 1 of 1 vehicle reached Hamburg.")
+
+
+@pytest.mark.parametrize("vehicles", [0, -1, 101, True, 5.0, "10", None])
+def test_an_invalid_vehicle_count_is_rejected(vehicles: object) -> None:
+    with pytest.raises(ScenarioError) as error:
+        run_scenario(GERMANY, "Berlin", "Munich", vehicles)  # type: ignore
+
+    assert str(error.value) == (
+        "The vehicle count must be a whole number from 1 to 100: "
+        f"{vehicles!r}."
+    )
+
+
+def test_listeners_receive_the_run_events() -> None:
+    first, second = EventRecorder(), EventRecorder()
+
+    result = run_scenario(
+        GERMANY, "Berlin", "Munich", 10, 0, listeners=[first, second]
+    )
+
+    assert first.events == second.events
+    assert first.events[0] == TurnStarted(1)
+    finished = [e for e in first.events if isinstance(e, TurnFinished)]
+    assert len(finished) == len(result.turns)
+    delivered = [
+        e for e in first.events if isinstance(e, AgentMoved) and e.delivered
+    ]
+    assert len(delivered) == 10
+
+
+def run_with_events(
+    map_file: Path, start: str, end: str, vehicles: int, seed: int
+) -> tuple[ScenarioResult, list[object]]:
+    recorder = EventRecorder()
+    result = run_scenario(
+        map_file, start, end, vehicles, seed, listeners=[recorder]
+    )
+    return result, list(recorder.events)
+
+
+def test_a_seed_makes_runs_reproducible_and_runs_are_independent() -> None:
+    """The same scenario and seed give the same run, before and after a
+    run of another scenario on the same map."""
+    first = run_with_events(GERMANY, "Berlin", "Munich", 10, 3)
+    other = run_with_events(GERMANY, "Munich", "Kiel", 50, 4)
+    again = run_with_events(GERMANY, "Berlin", "Munich", 10, 3)
+
+    assert again == first
+    assert other != first
+
+
+def test_every_run_has_its_own_graph_and_new_weather(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without a seed, each run gets a new random weather provider for its
+    own graph."""
+    made: list[tuple[Graph, int | None, RandomWeather]] = []
+
+    def recording_weather(
+        graph: Graph, seed: int | None = None
+    ) -> RandomWeather:
+        weather = RandomWeather(graph, seed=seed)
+        made.append((graph, seed, weather))
+        return weather
+
+    monkeypatch.setattr(scenario, "RandomWeather", recording_weather)
+
+    run_scenario(GERMANY, "Berlin", "Munich", 10)
+    run_scenario(GERMANY, "Berlin", "Munich", 10)
+
+    assert [seed for _, seed, _ in made] == [None, None]
+    assert made[0][0] is not made[1][0]
+    assert made[0][2] is not made[1][2]
+
+
+def test_running_does_not_change_the_map_file() -> None:
+    before = hashlib.sha256(GERMANY.read_bytes()).hexdigest()
+
+    run_scenario(GERMANY, "Berlin", "Munich", 10, 0)
+
+    assert hashlib.sha256(GERMANY.read_bytes()).hexdigest() == before
+
+
+def write_map(tmp_path: Path, text: str) -> Path:
+    map_file = tmp_path / "map.txt"
+    map_file.write_text(text, encoding="utf-8")
+    return map_file
+
+
+def test_a_scenario_without_a_route_does_not_start(tmp_path: Path) -> None:
+    map_file = write_map(
+        tmp_path,
+        "nb_drones: 1\n"
+        "start_hub: a 0 0\n"
+        "hub: b 1 0\n"
+        "end_hub: c 2 0\n"
+        "connection: a-b\n",
+    )
+    recorder = EventRecorder()
+
+    result = run_scenario(map_file, "a", "c", 3, 0, listeners=[recorder])
+
+    assert result == ScenarioResult(
+        ScenarioStatus.NO_ROUTE,
+        (),
+        0,
+        3,
+        "No route from a to c. 0 of 3 vehicles reached c.",
+    )
+    assert recorder.events == []
+
+
+def scripted(
+    schedule: dict[int, dict[str, WeatherCondition]],
+) -> object:
+    """A stand-in for `RandomWeather` that follows a fixed schedule."""
+    def weather(graph: Graph, seed: int | None = None) -> ScriptedWeather:
+        return ScriptedWeather(schedule)
+    return weather
+
+
+# The road-budget trap of `tests/unit/test_simulation.py`: snow on `E-h1`
+# on turn 4 sends D1 round through `h2` and `h0` while D2 waits in `h0`
+# for `h2`, and every way around breaks the 700 km road budget.
+DEADLOCK_TRAP = (
+    "nb_drones: 2\n"
+    "start_hub: S 0 0\n"
+    "end_hub: E 4 0\n"
+    "hub: h0 1 1\n"
+    "hub: h1 2 2\n"
+    "hub: h2 3 3\n"
+    "connection: h0-S [max_link_capacity=3 distance=400km mode=road]\n"
+    "connection: h2-h1 [max_link_capacity=3 distance=250km mode=road]\n"
+    "connection: E-h2 [max_link_capacity=3 distance=300km mode=road]\n"
+    "connection: h0-E [distance=450km mode=road]\n"
+    "connection: S-h1 [distance=400km mode=road]\n"
+    "connection: E-h1\n"
+    "connection: h0-h2\n"
+)
+
+
+def test_a_deadlock_ends_the_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    map_file = write_map(tmp_path, DEADLOCK_TRAP)
+    monkeypatch.setattr(
+        scenario,
+        "RandomWeather",
+        scripted({4: {"E-h1": WeatherCondition.SNOW}}),
+    )
+
+    result = run_scenario(map_file, "S", "E", 2)
+
+    assert result.status is ScenarioStatus.DEADLOCK
+    # The turn that raised did not complete.
+    assert len(result.turns) == 7
+    assert result.delivered < result.vehicles
+    assert result.message.startswith("Deadlock on turn 8 at h0, h2. ")
+
+
+def test_the_turn_limit_ends_the_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The only lane is closed for good, so the run reaches 10,000 turns."""
+    map_file = write_map(
+        tmp_path,
+        "nb_drones: 1\n"
+        "start_hub: start 0 0\n"
+        "end_hub: goal 1 0\n"
+        "connection: start-goal [distance=450km]\n",
+    )
+    monkeypatch.setattr(
+        scenario,
+        "RandomWeather",
+        scripted({1: {"start-goal": WeatherCondition.STORM}}),
+    )
+
+    result = run_scenario(map_file, "start", "goal", 1)
+
+    assert result.status is ScenarioStatus.TURN_LIMIT
+    assert len(result.turns) == 10000
+    assert result.delivered == 0
+    assert result.message == (
+        "Stopped after 10000 turns. 0 of 1 vehicle reached goal."
+    )

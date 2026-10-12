@@ -32,6 +32,15 @@ from airlanes.world.transport import is_available, travel_time
 from airlanes.world.weather import NoWeather, WeatherProvider, WeatherState
 
 
+class NoRouteError(RuntimeError):
+    """Initial planning finds no route from the start hub to the end hub,
+    whatever the weather. The run stops before its first turn."""
+
+
+class TurnLimitError(RuntimeError):
+    """The run did not deliver every aircraft within 10,000 turns."""
+
+
 class Simulator:
     def __init__(
         self,
@@ -94,7 +103,7 @@ class Simulator:
             )
 
             if not path:
-                raise RuntimeError(
+                raise NoRouteError(
                     "No valid route found between start and end zones."
                 )
 
@@ -117,7 +126,7 @@ class Simulator:
             self.turns.append(turn)
             turn_number += 1
             if turn_number > 10000:
-                raise RuntimeError("Simulation exceeded 10000 turns.")
+                raise TurnLimitError("Simulation exceeded 10000 turns.")
         return self.turns
 
     def _all_delivered(self) -> bool:

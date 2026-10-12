@@ -9,13 +9,25 @@ only read.
 
 The number of vehicles is one count for the whole fleet, chosen by the user
 rather than taken from the map.
+
+Running a scenario builds everything a run uses anew: the graph, the
+weather, the event dispatcher and the simulator. How the run ended is told
+apart by the type of the simulator's exception, never by its message.
 """
 
+from collections.abc import Iterable
+from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 
+from airlanes.events import EventDispatcher, EventListener
 from airlanes.mapfile import INTEGER, Parser
 from airlanes.model.graph import Graph
 from airlanes.model.zone import Zone
+from airlanes.results import TurnResult
+from airlanes.simulation.deadlock import DeadlockError
+from airlanes.simulation.engine import NoRouteError, Simulator, TurnLimitError
+from airlanes.world.weather import RandomWeather
 
 # The vehicle count of a scenario: the default, used for empty or invalid
 # input, and the range any other count is clamped to.
@@ -25,7 +37,32 @@ MAX_VEHICLE_COUNT = 100
 
 
 class ScenarioError(ValueError):
-    """The chosen start or end hub cannot be used on this map."""
+    """The chosen hubs or vehicle count cannot be used for a scenario."""
+
+
+class ScenarioStatus(Enum):
+    """How a scenario run ended."""
+
+    DELIVERED = "delivered"
+    NO_ROUTE = "no route"
+    DEADLOCK = "deadlock"
+    TURN_LIMIT = "turn limit"
+
+
+@dataclass(frozen=True)
+class ScenarioResult:
+    """
+    The outcome of one scenario run. `turns` are the turns that completed,
+    in order: all of them when every vehicle was delivered, those before
+    the failure otherwise, and none without a route. `message` describes
+    the outcome for the user.
+    """
+
+    status: ScenarioStatus
+    turns: tuple[TurnResult, ...]
+    delivered: int
+    vehicles: int
+    message: str
 
 
 def load_scenario_graph(
@@ -49,6 +86,77 @@ def load_scenario_graph(
     graph.start_zone = start_zone
     graph.end_zone = end_zone
     return graph
+
+
+def run_scenario(
+    map_path: str | Path,
+    start: str,
+    end: str,
+    vehicles: int,
+    weather_seed: int | None = None,
+    listeners: Iterable[EventListener] = (),
+) -> ScenarioResult:
+    """
+    Run `vehicles` vehicles from `start` to `end` on a fresh graph of the
+    map, under random weather, and report how the run ended.
+
+    Without a seed, every run has new weather; with one, runs of the same
+    scenario are identical. `listeners` receive the run's events. The
+    vehicle count must already be a whole number in the allowed range;
+    `normalize_vehicle_count` turns user input into one.
+    """
+    _check_vehicle_count(vehicles)
+    graph = load_scenario_graph(map_path, start, end)
+    dispatcher = EventDispatcher()
+    for listener in listeners:
+        dispatcher.add_listener(listener)
+    simulator = Simulator(
+        graph,
+        vehicles,
+        dispatcher,
+        weather=RandomWeather(graph, seed=weather_seed),
+    )
+
+    try:
+        simulator.run()
+    except NoRouteError:
+        status = ScenarioStatus.NO_ROUTE
+        message = f"No route from {start} to {end}."
+    except DeadlockError as error:
+        status = ScenarioStatus.DEADLOCK
+        message = (
+            f"Deadlock on turn {error.turn_number} at "
+            f"{', '.join(error.hubs)}."
+        )
+    except TurnLimitError:
+        status = ScenarioStatus.TURN_LIMIT
+        message = f"Stopped after {len(simulator.turns)} turns."
+    else:
+        status = ScenarioStatus.DELIVERED
+        message = f"Delivered in {len(simulator.turns)} turns."
+
+    delivered = sum(drone.is_delivered() for drone in simulator.drones)
+    noun = "vehicle" if vehicles == 1 else "vehicles"
+    return ScenarioResult(
+        status,
+        tuple(simulator.turns),
+        delivered,
+        vehicles,
+        f"{message} {delivered} of {vehicles} {noun} reached {end}.",
+    )
+
+
+def _check_vehicle_count(vehicles: int) -> None:
+    # A bool is an int in Python, but never a vehicle count.
+    if (
+        isinstance(vehicles, bool)
+        or not isinstance(vehicles, int)
+        or not MIN_VEHICLE_COUNT <= vehicles <= MAX_VEHICLE_COUNT
+    ):
+        raise ScenarioError(
+            f"The vehicle count must be a whole number from "
+            f"{MIN_VEHICLE_COUNT} to {MAX_VEHICLE_COUNT}: {vehicles!r}."
+        )
 
 
 def normalize_vehicle_count(value: str) -> int:
