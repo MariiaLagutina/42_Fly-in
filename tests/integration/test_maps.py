@@ -17,6 +17,8 @@ from airlanes.mapfile import Parser
 from airlanes.model.graph import Graph
 from airlanes.model.transport_mode import TransportMode
 from airlanes.routing.pathfinder import Pathfinder
+from airlanes.routing.policy import RoutingPolicy
+from airlanes.simulation.engine import NoRouteError
 from airlanes.world.weather import (
     RandomWeather,
     ScriptedWeather,
@@ -29,7 +31,9 @@ from tests.support.simulation import (
     check_invariants,
     check_outcomes_against_events,
     delivery_turns,
+    departure_modes,
     planned_delivery_turns,
+    record_route_searches,
     run_simulation,
 )
 
@@ -262,3 +266,153 @@ def test_a_storm_closes_the_milan_lane_until_it_clears() -> None:
     ]
     assert len(arrivals) == 3
     assert min(arrivals) >= 4
+
+
+# --- Transport modes and an unlimited road budget (ADR-029) -----------------
+
+GERMANY = "bonus/germany_map.txt"
+AIR, ROAD = TransportMode.AIR, TransportMode.ROAD
+AIR_ONLY = RoutingPolicy(transport_modes=frozenset({AIR}))
+ROAD_ONLY = RoutingPolicy(
+    max_consecutive_road_km=None, transport_modes=frozenset({ROAD})
+)
+# The only road from Kiel to Dresden: 95 + 150 + 140 + 120 + 35 + 190 km.
+KIEL_DRESDEN_BY_ROAD = [
+    "Hamburg", "Hanover", "Magdeburg", "Potsdam", "Berlin", "Dresden"
+]
+
+
+def germany(start: str, end: str) -> tuple[Graph, int]:
+    graph, nb_aircraft = Parser().parse(str(MAPS_DIR / GERMANY))
+    return with_terminals(graph, start, end), nb_aircraft
+
+
+def road_km_of(graph: Graph, start: str, route: list[str]) -> int:
+    hubs = [start, *route]
+    total = 0
+    for here, there in zip(hubs, hubs[1:]):
+        lane = graph.get_connection(graph.zones[here], graph.zones[there])
+        assert lane is not None and lane.mode is ROAD
+        total += lane.distance
+    return total
+
+
+def test_road_only_drives_kiel_to_dresden_by_road() -> None:
+    """730 km of consecutive road: beyond the 700 km of the default policy,
+    within road only, which has no limit."""
+    graph, nb_aircraft = germany("Kiel", "Dresden")
+
+    run = run_simulation(graph, nb_aircraft, policy=ROAD_ONLY)
+
+    assert check_invariants(run) == []
+    assert road_km_of(graph, "Kiel", KIEL_DRESDEN_BY_ROAD) == 730
+    assert departure_modes(run) == {ROAD}
+    for drone in run.simulator.drones:
+        assert drone.is_delivered()
+        assert run.visited_zones(drone.label) == KIEL_DRESDEN_BY_ROAD
+        assert drone.road_km_since_air == 730
+
+
+def test_the_default_policy_flies_part_of_kiel_to_dresden() -> None:
+    """Control: the default policy cannot drive 730 km, so it flies
+    Hamburg-Berlin, which ends the road stretch: only Berlin-Dresden, 190
+    km, counts at the end."""
+    graph, nb_aircraft = germany("Kiel", "Dresden")
+
+    run = run_simulation(graph, nb_aircraft)
+
+    assert check_invariants(run) == []
+    assert departure_modes(run) == {AIR, ROAD}
+    for drone in run.simulator.drones:
+        assert drone.is_delivered()
+        assert run.visited_zones(drone.label) == [
+            "Hamburg", "Berlin", "Dresden"
+        ]
+        assert drone.road_km_since_air == 190
+
+
+def test_a_storm_on_the_road_does_not_make_road_only_fly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The storm slows Hanover-Magdeburg, so aircraft before it reconsider
+    their route; Hamburg-Berlin by air would be faster, but every search
+    under road only finds the same road."""
+    graph, _ = germany("Kiel", "Dresden")
+    searches = record_route_searches(monkeypatch)
+    weather = ScriptedWeather(
+        {1: {"Hanover-Magdeburg": WeatherCondition.STORM}}
+    )
+
+    run = run_simulation(graph, 3, weather=weather, policy=ROAD_ONLY)
+
+    assert check_invariants(run) == []
+    road = ["Kiel", *KIEL_DRESDEN_BY_ROAD]
+    replanning = [s for s in searches if s.weather != WeatherState()]
+    assert replanning
+    for search in replanning:
+        assert search.policy == ROAD_ONLY
+        assert search.route == tuple(road[road.index(search.start) + 1:])
+    assert not any(isinstance(e, AgentRerouted) for e in run.events)
+    assert departure_modes(run) == {ROAD}
+    assert all(drone.is_delivered() for drone in run.simulator.drones)
+
+
+@pytest.mark.parametrize("seed", [0, 1, 2])
+def test_road_only_keeps_to_the_road_in_random_weather(
+    seed: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    graph, nb_aircraft = germany("Kiel", "Dresden")
+    searches = record_route_searches(monkeypatch)
+
+    run = run_simulation(
+        graph, nb_aircraft, RandomWeather(graph, seed=seed), ROAD_ONLY
+    )
+
+    assert check_invariants(run) == []
+    assert any(s.weather != WeatherState() for s in searches)
+    assert departure_modes(run) == {ROAD}
+    assert all(drone.is_delivered() for drone in run.simulator.drones)
+    assert {d.road_km_since_air for d in run.simulator.drones} == {730}
+
+
+@pytest.mark.parametrize(
+    ("start", "end"),
+    [("Kiel", "Munich"), ("Berlin", "Munich")],
+)
+def test_air_only_has_no_route_from_a_road_only_hub(
+    start: str, end: str
+) -> None:
+    """Kiel's only lane is a road; Berlin's air lanes reach only Hamburg
+    and Schwerin, whose other lanes are roads."""
+    graph, nb_aircraft = germany(start, end)
+
+    with pytest.raises(NoRouteError):
+        run_simulation(graph, nb_aircraft, policy=AIR_ONLY)
+
+
+@pytest.mark.parametrize("seed", [None, 0, 1])
+def test_air_only_flies_frankfurt_to_munich(seed: int | None) -> None:
+    graph, nb_aircraft = germany("Frankfurt", "Munich")
+    weather = RandomWeather(graph, seed=seed) if seed is not None else None
+
+    run = run_simulation(graph, nb_aircraft, weather, AIR_ONLY)
+
+    assert check_invariants(run) == []
+    assert departure_modes(run) == {AIR}
+    assert all(drone.is_delivered() for drone in run.simulator.drones)
+
+
+@pytest.mark.parametrize("seed", [None, 0, 1, 2])
+def test_air_only_changes_nothing_on_a_map_of_air_lanes(
+    seed: int | None,
+) -> None:
+    """Every lane of the Europe map is an air lane."""
+    graph, nb_aircraft = Parser().parse(str(MAPS_DIR / EUROPE))
+    weather = RandomWeather(graph, seed=seed) if seed is not None else None
+    default = simulate(EUROPE, seed)
+
+    run = run_simulation(graph, nb_aircraft, weather, AIR_ONLY)
+
+    assert check_invariants(run) == []
+    assert run.events == default.events
+    assert run.output == default.output

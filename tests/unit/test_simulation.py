@@ -7,6 +7,8 @@ aircraft on a single route, where restricted hubs and the documented
 distance travel-time formula leave no room for another valid answer.
 """
 
+from collections.abc import Callable
+
 import pytest
 
 from airlanes.events import AgentInTransit, AgentRerouted, WeatherChanged
@@ -15,20 +17,29 @@ from airlanes.model.graph import Graph
 from airlanes.model.transport_mode import TransportMode
 from airlanes.model.zone import Zone, ZoneType
 from airlanes.results import Arrival, Departure, Reroute, TurnResult
+from airlanes.routing.pathfinder import Pathfinder
+from airlanes.routing.policy import RoutingPolicy
 from airlanes.simulation.deadlock import DeadlockError
 from airlanes.simulation.engine import (
     NoRouteError,
     Simulator,
     TurnLimitError,
 )
-from airlanes.world.weather import ScriptedWeather, WeatherCondition
+from airlanes.world.weather import (
+    ScriptedWeather,
+    WeatherCondition,
+    WeatherState,
+)
 
 from tests.support.graphs import Link, build_graph, end_hub, hub, start_hub
 from tests.support.simulation import (
     check_invariants,
     delivery_turns,
+    departure_modes,
     peak_hub_occupancy,
     planned_delivery_turns,
+    record_route_searches,
+    RouteSearch,
     SimulationRun,
     run_simulation,
 )
@@ -1039,3 +1050,260 @@ def test_waiting_for_weather_is_not_a_deadlock() -> None:
     assert check_invariants(run) == []
     assert deadlock_reroutes(run) == []
     assert run.turn_count > 30
+
+
+# --- Transport modes and an unlimited road budget (ADR-029) -----------------
+# A policy that excludes a mode holds for the whole run: initial planning,
+# weather replanning and deadlock handling choose only its lanes, while
+# capacities and weather work as before. `record_route_searches` shows that
+# replanning and deadlock handling did search, and under which policy.
+
+AIR_ONLY = RoutingPolicy(transport_modes=frozenset({AIR}))
+ROAD_ONLY = RoutingPolicy(
+    max_consecutive_road_km=None, transport_modes=frozenset({ROAD})
+)
+
+
+def weather_searches(searches: list[RouteSearch]) -> list[RouteSearch]:
+    """The searches of weather replanning: under weather, avoiding no
+    hub."""
+    return [
+        search for search in searches
+        if search.weather != WeatherState() and not search.avoid
+    ]
+
+
+def test_road_only_drives_past_700_km_through_a_storm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The storm slows the first road leg, so the aircraft reconsiders its
+    route at `start`. The direct air lane is excluded: it keeps the 800 km
+    of road, which no budget limits."""
+    searches = record_route_searches(monkeypatch)
+    weather = ScriptedWeather({1: {"start-r": STORM}})
+
+    run = run_simulation(air_with_road_fallback(400), 1, weather, ROAD_ONLY)
+
+    assert check_invariants(run) == []
+    assert weather_searches(searches) == [
+        RouteSearch(
+            ROAD_ONLY, "start", WeatherState({"start-r": STORM}),
+            frozenset(), ("r", "goal"),
+        )
+    ]
+    assert reroutes(run) == []
+    assert run.visited_zones("D1") == ["r", "goal"]
+    assert departure_modes(run) == {ROAD}
+    assert run.simulator.drones[0].road_km_since_air == 800
+
+
+def test_road_only_reroutes_over_another_road() -> None:
+    """The storm makes the road through `a` 4 turns; the road through `b`
+    and `c` takes 3. The 450 km air lane, 2 turns, is excluded."""
+    graph = build_graph(
+        [start_hub(), hub("a"), hub("b"), hub("c"), end_hub()],
+        [
+            Link("start", "a", distance=100, mode=ROAD),
+            Link("a", "goal", distance=100, mode=ROAD),
+            Link("start", "b", distance=100, mode=ROAD),
+            Link("b", "c", distance=100, mode=ROAD),
+            Link("c", "goal", distance=100, mode=ROAD),
+            Link("start", "goal", distance=450),
+        ],
+    )
+    weather = ScriptedWeather({1: {"start-a": STORM}})
+
+    run = run_simulation(graph, 1, weather, ROAD_ONLY)
+
+    assert check_invariants(run) == []
+    assert reroutes(run) == [
+        AgentRerouted(1, "D1", "start", ("b", "c", "goal"), "weather")
+    ]
+    assert departure_modes(run) == {ROAD}
+    assert delivery_turns(run) == {"D1": 3}
+
+
+def test_air_only_waits_instead_of_a_road_detour(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The same storm makes the default policy drive the road (see
+    `test_road_becomes_the_fallback_when_air_closes`). Air only finds no
+    route while the air lane is closed, and waits for it."""
+    searches = record_route_searches(monkeypatch)
+    weather = ScriptedWeather({
+        1: {"start-goal": STORM}, 3: {"start-goal": CLEAR},
+    })
+
+    run = run_simulation(air_with_road_fallback(150), 1, weather, AIR_ONLY)
+
+    assert check_invariants(run) == []
+    found = weather_searches(searches)
+    assert [search.route for search in found] == [None, None]
+    assert {search.policy for search in found} == {AIR_ONLY}
+    assert reroutes(run) == []
+    assert departure_turns(run) == [3]
+    assert departure_modes(run) == {AIR}
+
+
+def test_air_only_reroutes_over_another_air_route() -> None:
+    """The 150 km road to the goal would be the fastest route; air only
+    plans through `a` and, once a storm closes `start-a`, flies through
+    `b`."""
+    graph = build_graph(
+        [start_hub(), hub("a"), hub("b"), end_hub()],
+        [
+            Link("start", "a", distance=450),
+            Link("a", "goal", distance=450),
+            Link("start", "b", distance=900),
+            Link("b", "goal", distance=900),
+            Link("start", "goal", distance=150, mode=ROAD),
+        ],
+    )
+    weather = ScriptedWeather({1: {"start-a": STORM}})
+
+    run = run_simulation(graph, 1, weather, AIR_ONLY)
+
+    assert check_invariants(run) == []
+    assert reroutes(run) == [
+        AgentRerouted(1, "D1", "start", ("b", "goal"), "weather")
+    ]
+    assert departure_modes(run) == {AIR}
+
+
+@pytest.mark.parametrize(
+    ("policy", "excluded"),
+    [(AIR_ONLY, ROAD), (ROAD_ONLY, AIR)],
+    ids=["air-only", "road-only"],
+)
+def test_a_route_only_of_an_excluded_mode_fails_before_the_first_turn(
+    policy: RoutingPolicy, excluded: TransportMode
+) -> None:
+    """The lanes exist, but the last leg is of the excluded mode."""
+    graph = build_graph(
+        [start_hub(), hub("a"), end_hub()],
+        [
+            Link("start", "a", distance=100, mode=AIR if excluded is ROAD
+                 else ROAD),
+            Link("a", "goal", distance=100, mode=excluded),
+        ],
+    )
+
+    with pytest.raises(NoRouteError):
+        run_simulation(graph, 1, policy=policy)
+
+
+@pytest.mark.parametrize(
+    ("graph", "weather"),
+    [
+        pytest.param(
+            road_or_air, {1: {"start-a": STORM}}, id="road-or-air"
+        ),
+        pytest.param(
+            lambda: air_with_road_fallback(400),
+            {1: {"start-goal": STORM}, 3: {"start-goal": CLEAR}},
+            id="road-over-budget",
+        ),
+        pytest.param(
+            lane_for_one_between_full_hubs,
+            {1: {"E-h3": STORM}, 4: {"E-h3": CLEAR},
+             6: {"h2-E": STORM}, 7: {"h2-E": CLEAR}},
+            id="deadlock",
+        ),
+    ],
+)
+def test_every_mode_with_700_km_is_the_default_policy(
+    graph: Callable[[], Graph],
+    weather: dict[int, dict[str, WeatherCondition]],
+) -> None:
+    """Naming both modes and the 700 km budget changes nothing."""
+    both = RoutingPolicy(700, frozenset({AIR, ROAD}))
+
+    default = run_simulation(graph(), 3, ScriptedWeather(weather))
+    named = run_simulation(graph(), 3, ScriptedWeather(weather), both)
+
+    assert check_invariants(named) == []
+    assert named.events == default.events
+    assert named.simulator.turns == default.simulator.turns
+
+
+def lane_for_one_with_a_road_around() -> Graph:
+    """`lane_for_one_between_full_hubs` with a 900 km air lane `h2-E`, and
+    a road from `h2` around `h3`: 2 turns against 3 by air."""
+    return build_graph(
+        [start_hub("S"), end_hub("E"), hub("h2"),
+         hub("h3", ZoneType.RESTRICTED), hub("r")],
+        [
+            Link("h3", "h2"),
+            Link("h3", "S"),
+            Link("h2", "E", distance=900),
+            Link("E", "h3"),
+            Link("h2", "r", distance=100, mode=ROAD),
+            Link("r", "E", distance=100, mode=ROAD),
+        ],
+    )
+
+
+DEADLOCK_WEATHER = {
+    1: {"E-h3": STORM}, 4: {"E-h3": CLEAR},
+    6: {"h2-E": STORM}, 7: {"h2-E": CLEAR},
+}
+
+
+def test_the_default_policy_drives_around_the_closed_air_lane() -> None:
+    """Control for the test below: from the first storm on, the default
+    policy routes every aircraft over the road from `h2`, and no deadlock
+    arises."""
+    run = run_simulation(
+        lane_for_one_with_a_road_around(), 3,
+        ScriptedWeather(DEADLOCK_WEATHER),
+    )
+
+    assert check_invariants(run) == []
+    assert deadlock_reroutes(run) == []
+    assert all(
+        "r" in run.visited_zones(drone.label) for drone in run.simulator.drones
+    )
+
+
+def test_air_only_deadlock_is_resolved_by_air(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Air only reroutes D2 towards `h3` instead, into the deadlock of
+    `test_deadlock_after_reroutes_is_resolved_by_a_way_around`. Deadlock
+    handling searches a way around `h3` once and takes the 900 km air
+    lane, although the road around would be faster and is open."""
+    graph = lane_for_one_with_a_road_around()
+    searches = record_route_searches(monkeypatch)
+
+    run = run_simulation(graph, 3, ScriptedWeather(DEADLOCK_WEATHER), AIR_ONLY)
+
+    assert check_invariants(run) == []
+    assert [search for search in searches if search.avoid] == [
+        RouteSearch(AIR_ONLY, "h2", WeatherState(), frozenset({"h3"}),
+                    ("E",)),
+    ]
+    assert deadlock_reroutes(run) == [
+        AgentRerouted(7, "D2", "h2", ("E",), "deadlock")
+    ]
+    assert departure_modes(run) == {AIR}
+    way_around = Pathfinder(graph).find_route(
+        graph.zones["h2"], graph.zones["E"], WeatherState(), 0,
+        frozenset({"h3"}),
+    )
+    assert way_around is not None
+    assert [zone.name for zone in way_around] == ["r", "E"]
+
+
+def test_the_checker_reports_lanes_the_policy_excludes() -> None:
+    """A real run of the default policy drives the road around the closed
+    air lane; checked against air only, every road leg is reported."""
+    weather = ScriptedWeather({1: {"start-goal": STORM}})
+    run = run_simulation(air_with_road_fallback(150), 1, weather)
+    assert check_invariants(run) == []
+
+    run.simulator.policy = AIR_ONLY
+
+    assert check_invariants(run) == [
+        "turn 1: D1 used road lane start-r, excluded by the routing policy",
+        "turn 3: D1 used road lane r-goal, excluded by the routing policy",
+    ]

@@ -1,4 +1,5 @@
-"""Pathfinder: shape of planned routes, reachability, and the road budget.
+"""Pathfinder: shape of planned routes, reachability, the road budget, and
+the transport modes the routing policy permits.
 
 Only the API the simulator uses is tested. Search order, cost weights, and
 the reservation table format are implementation details.
@@ -302,3 +303,97 @@ def test_cooperative_plan_respects_the_road_budget() -> None:
 
 def test_no_cooperative_plan_when_only_route_breaks_the_budget() -> None:
     assert plan_alone(road_chain(400, 400)) == []
+
+
+# --- transport modes and an unlimited road budget (ADR-029) ----------------
+# Both searches take the lanes the routing policy permits. A lane of an
+# excluded mode stays in the graph; routing just does not choose it.
+
+AIR = TransportMode.AIR
+AIR_ONLY = RoutingPolicy(transport_modes=frozenset({AIR}))
+ROAD_ONLY = RoutingPolicy(None, frozenset({ROAD}))
+
+
+def plan_with(graph: Graph, policy: RoutingPolicy) -> list[str]:
+    """Cooperative route with no other aircraft reserved, as hub names
+    after the start; empty without a route."""
+    assert graph.start_zone is not None and graph.end_zone is not None
+    route = Pathfinder(graph, policy).find_cooperative_path(
+        graph.start_zone, graph.end_zone, {}, {}, {}
+    )
+    if route:
+        assert_valid_route(graph, route)
+    return [zone.name for zone in route[1:]]
+
+
+def air_or_road() -> Graph:
+    """A direct air lane (one turn) and a road through `a` (two turns)."""
+    return build_graph(
+        [start_hub(), hub("a"), end_hub()],
+        [
+            Link("start", "goal", distance=400),
+            Link("start", "a", distance=100, mode=ROAD),
+            Link("a", "goal", distance=100, mode=ROAD),
+        ],
+    )
+
+
+def test_find_route_takes_only_permitted_modes() -> None:
+    graph = air_or_road()
+
+    assert find(graph) == ["goal"]
+    assert find(graph, policy=AIR_ONLY) == ["goal"]
+    assert find(graph, policy=ROAD_ONLY) == ["a", "goal"]
+
+
+def test_cooperative_plan_takes_only_permitted_modes() -> None:
+    graph = air_or_road()
+
+    assert plan_with(graph, RoutingPolicy()) == ["goal"]
+    assert plan_with(graph, AIR_ONLY) == ["goal"]
+    assert plan_with(graph, ROAD_ONLY) == ["a", "goal"]
+
+
+def test_no_route_when_only_excluded_lanes_lead_to_the_end() -> None:
+    roads = road_chain(100, 100)
+
+    assert find(roads, policy=AIR_ONLY) is None
+    assert plan_with(roads, AIR_ONLY) == []
+
+
+def test_lanes_without_distance_are_excluded_by_road_only() -> None:
+    graph = build_graph([start_hub(), end_hub()], [Link("start", "goal")])
+
+    assert find(graph, policy=ROAD_ONLY) is None
+    assert plan_with(graph, ROAD_ONLY) == []
+
+
+def test_without_a_budget_road_beyond_700_km_is_allowed() -> None:
+    graph = road_chain(400, 400)
+
+    assert find(graph) is None
+    assert find(graph, policy=ROAD_ONLY) == ["h1", "goal"]
+    assert find(graph, policy=RoutingPolicy(None)) == ["h1", "goal"]
+    assert plan_with(graph, ROAD_ONLY) == ["h1", "goal"]
+
+
+def test_without_a_budget_road_already_driven_does_not_matter() -> None:
+    assert find(road_chain(300), road_km=5000, policy=ROAD_ONLY) == ["goal"]
+
+
+def test_the_road_budget_still_applies_to_road_lanes_of_a_mode_set() -> None:
+    graph = road_chain(400, 400)
+    roads_with_budget = RoutingPolicy(700, frozenset({ROAD}))
+
+    assert find(graph, policy=roads_with_budget) is None
+    assert plan_with(graph, roads_with_budget) == []
+
+
+def test_an_excluded_lane_stays_in_the_graph() -> None:
+    graph = air_or_road()
+    lanes = [(c.name(), c.mode) for c in graph.connections]
+
+    find(graph, policy=ROAD_ONLY)
+    plan_with(graph, AIR_ONLY)
+
+    assert [(c.name(), c.mode) for c in graph.connections] == lanes

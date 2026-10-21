@@ -22,6 +22,8 @@ hub (ADR-010, ADR-017).
 
 from dataclasses import dataclass
 
+import pytest
+
 from airlanes.events import (
     AgentInTransit,
     AgentMoved,
@@ -34,12 +36,13 @@ from airlanes.events import (
 )
 from airlanes.model.graph import Graph
 from airlanes.model.transport_mode import TransportMode
-from airlanes.model.zone import ZoneType
+from airlanes.model.zone import Zone, ZoneType
 from airlanes.output.text import Visualizer, movement_tokens
 from airlanes.results import Arrival, Departure, Reroute
+from airlanes.routing.pathfinder import Pathfinder
 from airlanes.routing.policy import RoutingPolicy
 from airlanes.simulation.engine import Simulator
-from airlanes.world.weather import WeatherProvider
+from airlanes.world.weather import WeatherProvider, WeatherState
 
 
 class EventRecorder:
@@ -143,7 +146,8 @@ class _InvariantChecker:
         self.departures: set[tuple[str, str]] = set()
         self.peak_occupancy: dict[str, int] = {}
         self.road_km: dict[str, int] = {label: 0 for label in self.positions}
-        self.max_road_km = run.simulator.policy.max_consecutive_road_km
+        self.policy = run.simulator.policy
+        self.max_road_km = self.policy.max_consecutive_road_km
 
     def fail(self, message: str) -> None:
         self.violations.append(f"turn {self.turn}: {message}")
@@ -290,13 +294,21 @@ class _InvariantChecker:
         self.departures.add((lane, origin))
 
     def _drive(self, label: str, lane: str) -> None:
-        """Track consecutive road distance; an air leg resets it."""
+        """Check that the run's routing policy permits the lane's mode, and
+        track consecutive road distance; an air leg resets it. Without a
+        budget, any distance is allowed."""
         connection = self.connections[lane]
+        if not self.policy.allows(connection):
+            self.fail(f"{label} used {connection.mode.value} lane {lane}, "
+                      "excluded by the routing policy")
         if connection.mode is not TransportMode.ROAD:
             self.road_km[label] = 0
             return
         self.road_km[label] += connection.distance
-        if self.road_km[label] > self.max_road_km:
+        if (
+            self.max_road_km is not None
+            and self.road_km[label] > self.max_road_km
+        ):
             self.fail(f"{label} drove {self.road_km[label]} km of "
                       f"consecutive road, limit {self.max_road_km}")
 
@@ -392,6 +404,62 @@ def delivery_turns(run: SimulationRun) -> dict[str, int]:
         for event in run.events
         if isinstance(event, AgentMoved) and event.delivered
     }
+
+
+def departure_modes(run: SimulationRun) -> set[TransportMode]:
+    """The modes of every lane an aircraft departed on."""
+    lanes = {lane.name(): lane for lane in run.graph.connections}
+    return {
+        lanes[outcome.lane].mode
+        for result in run.simulator.turns
+        for outcome in result.outcomes
+        if isinstance(outcome, Departure)
+    }
+
+
+@dataclass(frozen=True)
+class RouteSearch:
+    """One `Pathfinder.find_route` call: under which policy and weather it
+    searched from `start`, which hubs it avoided, and the route it found."""
+
+    policy: RoutingPolicy
+    start: str
+    weather: WeatherState
+    avoid: frozenset[str]
+    route: tuple[str, ...] | None
+
+
+def record_route_searches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[RouteSearch]:
+    """
+    Record every route search from now on. Weather replanning and
+    deadlock handling both search with `find_route`; the cooperative
+    planner calls it once in clear weather to check that a route exists.
+    """
+    searches: list[RouteSearch] = []
+    find_route = Pathfinder.find_route
+
+    def recording_find_route(
+        pathfinder: Pathfinder,
+        start: Zone,
+        end: Zone,
+        weather: WeatherState,
+        road_km: int = 0,
+        avoid: frozenset[str] = frozenset(),
+    ) -> list[Zone] | None:
+        route = find_route(pathfinder, start, end, weather, road_km, avoid)
+        searches.append(RouteSearch(
+            pathfinder.policy,
+            start.name,
+            weather,
+            avoid,
+            None if route is None else tuple(zone.name for zone in route),
+        ))
+        return route
+
+    monkeypatch.setattr(Pathfinder, "find_route", recording_find_route)
+    return searches
 
 
 def committed_hub_load_by_turn(
