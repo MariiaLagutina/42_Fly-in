@@ -13,7 +13,9 @@ rather than taken from the map.
 A routing mode is the user's choice of which of the map's lanes routing may
 use. It becomes the run's routing policy; it changes no lane of the graph
 and is not a property of a vehicle. A map offers the modes its own lanes
-allow. That says nothing about a route between two particular hubs.
+allow. That says nothing about a route between two particular hubs:
+`check_route` checks that, in clear weather, before a run, and proposes
+another mode when the chosen one has no route. It never starts a run.
 
 Running a scenario builds everything a run uses anew: the graph, the
 weather, the event dispatcher and the simulator. How the run ended is told
@@ -31,10 +33,11 @@ from airlanes.model.graph import Graph
 from airlanes.model.transport_mode import TransportMode
 from airlanes.model.zone import Zone
 from airlanes.results import TurnResult
+from airlanes.routing.pathfinder import Pathfinder
 from airlanes.routing.policy import RoutingPolicy
 from airlanes.simulation.deadlock import DeadlockError
 from airlanes.simulation.engine import NoRouteError, Simulator, TurnLimitError
-from airlanes.world.weather import RandomWeather
+from airlanes.world.weather import RandomWeather, WeatherState
 
 # The vehicle count of a scenario: the default, used for empty or invalid
 # input, and the range any other count is clamped to.
@@ -113,6 +116,29 @@ class ScenarioResult:
     turns: tuple[TurnResult, ...]
     delivered: int
     vehicles: int
+    message: str
+
+
+class RouteCheckStatus(Enum):
+    """What the route check before a run found."""
+
+    ROUTE = "route"
+    MODE_CHANGED = "mode changed"
+    NO_ROUTE = "no route"
+
+
+@dataclass(frozen=True)
+class RouteCheck:
+    """
+    The route check of a scenario. `requested` is the mode the user chose;
+    `mode` is the mode to show and run: the requested one when it has a
+    route, otherwise the first other mode with one, and None when no mode
+    has one. `message` explains the outcome to the user.
+    """
+
+    status: RouteCheckStatus
+    requested: RoutingMode
+    mode: RoutingMode | None
     message: str
 
 
@@ -207,6 +233,60 @@ def run_scenario(
     )
 
 
+def check_route(
+    map_path: str | Path, start: str, end: str, mode: RoutingMode
+) -> RouteCheck:
+    """
+    Whether `mode` has a route from `start` to `end`, and if not, the mode
+    to propose instead (ADR-029).
+
+    A mode has a route when routing finds one under its policy in clear
+    weather, as the simulator checks before its first turn. A lane that
+    weather closes for a while never makes a route unavailable. A route
+    does not promise delivery: weather, capacity and deadlocks are the
+    run's to handle.
+
+    Without a route, the other modes the map offers are tried in the order
+    Mixed, Road only, Air only, and the first with a route is proposed.
+    The hubs are kept; nothing runs. The check reads the map file into a
+    graph of its own, so it changes no map and no other scenario. Unknown,
+    blocked or equal hubs and a mode the map does not offer are a
+    ScenarioError, as for a run.
+    """
+    graph = load_scenario_graph(map_path, start, end)
+    available = _check_mode(graph, mode)
+
+    if _has_route(graph, mode):
+        return RouteCheck(
+            RouteCheckStatus.ROUTE, mode, mode,
+            f"{mode.value} has a route from {start} to {end}.",
+        )
+    missing = f"{mode.value} has no route from {start} to {end}."
+    others = [other for other in available if other is not mode]
+    for other in others:
+        if _has_route(graph, other):
+            return RouteCheck(
+                RouteCheckStatus.MODE_CHANGED, mode, other,
+                f"{missing} Mode changed to {other.value}. "
+                "Press Start Simulation to run.",
+            )
+    if others:
+        missing = f"No mode has a route from {start} to {end}."
+    return RouteCheck(
+        RouteCheckStatus.NO_ROUTE, mode, None,
+        f"{missing} Choose other hubs.",
+    )
+
+
+def _has_route(graph: Graph, mode: RoutingMode) -> bool:
+    assert graph.start_zone is not None and graph.end_zone is not None
+    pathfinder = Pathfinder(graph, routing_policy(mode))
+    route = pathfinder.find_route(
+        graph.start_zone, graph.end_zone, WeatherState()
+    )
+    return route is not None
+
+
 def _check_vehicle_count(vehicles: int) -> None:
     # A bool is an int in Python, but never a vehicle count.
     if (
@@ -220,7 +300,10 @@ def _check_vehicle_count(vehicles: int) -> None:
         )
 
 
-def _check_mode(graph: Graph, mode: RoutingMode) -> None:
+def _check_mode(
+    graph: Graph, mode: RoutingMode
+) -> tuple[RoutingMode, ...]:
+    """The modes the map offers, which must include `mode`."""
     available = available_routing_modes(graph)
     if mode not in available:
         offered = ", ".join(m.value for m in available) or "none"
@@ -228,6 +311,7 @@ def _check_mode(graph: Graph, mode: RoutingMode) -> None:
             f"{mode.value} is not available on this map. "
             f"Available modes: {offered}."
         )
+    return available
 
 
 def normalize_vehicle_count(value: str) -> int:

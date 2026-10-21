@@ -1,10 +1,12 @@
 """Scenarios (ADR-029): chosen start and end hubs on a fresh graph, the
-vehicle count, routing modes, and runs with typed results."""
+vehicle count, routing modes, the route check before a run, and runs with
+typed results."""
 
 import hashlib
 from itertools import permutations
 import math
 from pathlib import Path
+import random
 import sys
 from typing import Any
 
@@ -25,11 +27,14 @@ from airlanes.scenario import (
     DEFAULT_VEHICLE_COUNT,
     MAX_VEHICLE_COUNT,
     MIN_VEHICLE_COUNT,
+    RouteCheck,
+    RouteCheckStatus,
     RoutingMode,
     ScenarioError,
     ScenarioResult,
     ScenarioStatus,
     available_routing_modes,
+    check_route,
     load_scenario_graph,
     normalize_vehicle_count,
     routing_policy,
@@ -40,6 +45,7 @@ from airlanes.world.weather import (
     RandomWeather,
     ScriptedWeather,
     WeatherCondition,
+    WeatherState,
 )
 
 from tests.support.graphs import Link, build_graph, end_hub, hub, start_hub
@@ -48,6 +54,8 @@ from tests.support.simulation import (
     SimulationRun,
     check_invariants,
     departure_modes,
+    RouteSearch,
+    record_route_searches,
     run_simulation,
 )
 
@@ -862,3 +870,370 @@ def test_runs_in_different_modes_share_no_state(
         for name, zone in run.graph.zones.items():
             assert zone.max_drones == map_graph.zones[name].max_drones
     assert list(recorder.events) == runs[1].events
+
+
+# --- Route check before a run ------------------------------------------------
+# Synthetic maps are written to files, as the check reads a map file. The
+# route searches are recorded to show which modes were tried, in which
+# order and weather, and what each found.
+
+ROUTE = RouteCheckStatus.ROUTE
+MODE_CHANGED = RouteCheckStatus.MODE_CHANGED
+NO_ROUTE = RouteCheckStatus.NO_ROUTE
+
+
+def searched(
+    searches: list[RouteSearch],
+) -> list[tuple[RoutingPolicy, tuple[str, ...] | None]]:
+    """The policy and the route found of each search, all in clear
+    weather."""
+    assert all(search.weather == WeatherState() for search in searches)
+    return [(search.policy, search.route) for search in searches]
+
+
+# 800 km of road, over the 700 km of Mixed; the air lane `x-y` leads
+# nowhere but gives the map both modes.
+LONG_ROAD = (
+    "nb_drones: 1\n"
+    "start_hub: S 0 0\n"
+    "hub: a 1 0\n"
+    "end_hub: E 2 0\n"
+    "hub: x 0 1\n"
+    "hub: y 1 1\n"
+    "connection: S-a [distance=400km mode=road]\n"
+    "connection: a-E [distance=400km mode=road]\n"
+    "connection: x-y [distance=300km]\n"
+)
+
+# Air lanes from S to E exist, but only through a blocked hub; the road
+# is too long for Mixed.
+AIR_THROUGH_A_BLOCKED_HUB = LONG_ROAD + (
+    "hub: wall 1 2 [zone=blocked]\n"
+    "connection: S-wall [distance=300km]\n"
+    "connection: wall-E [distance=300km]\n"
+)
+
+# A short road from S to E, and an air lane from S that leads nowhere.
+SHORT_ROAD = (
+    "nb_drones: 1\n"
+    "start_hub: S 0 0\n"
+    "hub: a 1 0\n"
+    "end_hub: E 2 0\n"
+    "hub: x 0 1\n"
+    "connection: S-a [distance=100km mode=road]\n"
+    "connection: a-E [distance=100km mode=road]\n"
+    "connection: S-x [distance=300km]\n"
+)
+
+# An air lane from S to E, and a road that leads nowhere.
+DIRECT_AIR = (
+    "nb_drones: 1\n"
+    "start_hub: S 0 0\n"
+    "end_hub: E 2 0\n"
+    "hub: x 0 1\n"
+    "hub: y 1 1\n"
+    "connection: S-E [distance=300km]\n"
+    "connection: x-y [distance=100km mode=road]\n"
+)
+
+# Both modes, but S and E are in different parts of the map.
+APART = (
+    "nb_drones: 1\n"
+    "start_hub: S 0 0\n"
+    "hub: a 1 0\n"
+    "hub: b 2 0\n"
+    "end_hub: E 3 0\n"
+    "connection: S-a [distance=300km]\n"
+    "connection: b-E [distance=100km mode=road]\n"
+)
+
+
+def test_a_mode_with_a_route_is_kept(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    searches = record_route_searches(monkeypatch)
+
+    check = check_route(write_map(tmp_path, SHORT_ROAD), "S", "E", ROAD_ONLY)
+
+    assert check == RouteCheck(
+        ROUTE, ROAD_ONLY, ROAD_ONLY, "Road only has a route from S to E."
+    )
+    assert searched(searches) == [(routing_policy(ROAD_ONLY), ("a", "E"))]
+
+
+def test_mixed_over_its_road_budget_changes_to_road_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    searches = record_route_searches(monkeypatch)
+
+    check = check_route(write_map(tmp_path, LONG_ROAD), "S", "E", MIXED)
+
+    assert check == RouteCheck(
+        MODE_CHANGED, MIXED, ROAD_ONLY,
+        "Mixed has no route from S to E. Mode changed to Road only. "
+        "Press Start Simulation to run.",
+    )
+    assert searched(searches) == [
+        (routing_policy(MIXED), None),
+        (routing_policy(ROAD_ONLY), ("a", "E")),
+    ]
+
+
+def test_air_lanes_without_a_route_are_no_route(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The map has air lanes from S and to E, so it offers Air only, but
+    they meet at a blocked hub. Mixed is over its budget on the road, so
+    the check goes on to Road only."""
+    map_file = write_map(tmp_path, AIR_THROUGH_A_BLOCKED_HUB)
+    graph = load_scenario_graph(map_file, "S", "E")
+    assert available_routing_modes(graph) == (MIXED, ROAD_ONLY, AIR_ONLY)
+    searches = record_route_searches(monkeypatch)
+
+    check = check_route(map_file, "S", "E", AIR_ONLY)
+
+    assert (check.status, check.mode) == (MODE_CHANGED, ROAD_ONLY)
+    assert searched(searches) == [
+        (routing_policy(AIR_ONLY), None),
+        (routing_policy(MIXED), None),
+        (routing_policy(ROAD_ONLY), ("a", "E")),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("text", "requested"),
+    [
+        pytest.param(SHORT_ROAD, AIR_ONLY, id="road-only-also-has-one"),
+        pytest.param(DIRECT_AIR, ROAD_ONLY, id="air-only-also-has-one"),
+    ],
+)
+def test_mixed_is_proposed_first(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    text: str,
+    requested: RoutingMode,
+) -> None:
+    """Both other modes have a route; Mixed comes first, and the check
+    stops there."""
+    map_file = write_map(tmp_path, text)
+    other = ({MIXED, ROAD_ONLY, AIR_ONLY} - {MIXED, requested}).pop()
+    assert check_route(map_file, "S", "E", other).status is ROUTE
+    searches = record_route_searches(monkeypatch)
+
+    check = check_route(map_file, "S", "E", requested)
+
+    assert (check.status, check.requested, check.mode) == (
+        MODE_CHANGED, requested, MIXED
+    )
+    assert [policy for policy, _ in searched(searches)] == [
+        routing_policy(requested), routing_policy(MIXED)
+    ]
+
+
+@pytest.mark.parametrize("requested", list(RoutingMode))
+def test_no_mode_with_a_route_keeps_the_hubs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, requested: RoutingMode
+) -> None:
+    searches = record_route_searches(monkeypatch)
+
+    check = check_route(write_map(tmp_path, APART), "S", "E", requested)
+
+    assert check == RouteCheck(
+        NO_ROUTE, requested, None,
+        "No mode has a route from S to E. Choose other hubs.",
+    )
+    assert [policy for policy, _ in searched(searches)] == [
+        routing_policy(requested),
+        *(routing_policy(m) for m in RoutingMode if m is not requested),
+    ]
+    assert all(route is None for _, route in searched(searches))
+
+
+def test_the_only_mode_without_a_route_is_named(tmp_path: Path) -> None:
+    map_file = write_map(
+        tmp_path,
+        "nb_drones: 1\n"
+        "start_hub: S 0 0\n"
+        "hub: a 1 0\n"
+        "end_hub: E 2 0\n"
+        "connection: S-a\n",
+    )
+
+    check = check_route(map_file, "S", "E", AIR_ONLY)
+
+    assert check == RouteCheck(
+        NO_ROUTE, AIR_ONLY, None,
+        "Air only has no route from S to E. Choose other hubs.",
+    )
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "requested", "status", "mode"),
+    [
+        ("Kiel", "Dresden", ROAD_ONLY, ROUTE, ROAD_ONLY),
+        ("Kiel", "Dresden", MIXED, ROUTE, MIXED),
+        ("Hamburg", "Berlin", AIR_ONLY, ROUTE, AIR_ONLY),
+        ("Kiel", "Munich", AIR_ONLY, MODE_CHANGED, MIXED),
+        ("Berlin", "Munich", ROAD_ONLY, MODE_CHANGED, MIXED),
+    ],
+)
+def test_germany_routes(
+    start: str,
+    end: str,
+    requested: RoutingMode,
+    status: RouteCheckStatus,
+    mode: RoutingMode,
+) -> None:
+    check = check_route(GERMANY, start, end, requested)
+
+    assert (check.status, check.requested, check.mode) == (
+        status, requested, mode
+    )
+
+
+@pytest.mark.parametrize(
+    ("mode", "pairs"), [(MIXED, 240), (ROAD_ONLY, 78), (AIR_ONLY, 78)]
+)
+def test_germany_pairs_with_a_route_in_each_mode(
+    mode: RoutingMode, pairs: int
+) -> None:
+    """The counts of the study behind ADR-029; Mixed reaches every pair,
+    so every change of mode lands on Mixed."""
+    graph, _ = Parser().parse(str(GERMANY))
+    checks = [
+        check_route(GERMANY, start, end, mode)
+        for start, end in permutations(graph.zones, 2)
+    ]
+
+    assert sum(check.status is ROUTE for check in checks) == pairs
+    assert {check.mode for check in checks} == {mode, MIXED}
+
+
+def test_europe_keeps_air_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    searches = record_route_searches(monkeypatch)
+
+    check = check_route(EUROPE, "Reykjavik", "Milan", AIR_ONLY)
+
+    assert (check.status, check.mode) == (ROUTE, AIR_ONLY)
+    assert [policy for policy, _ in searched(searches)] == [
+        routing_policy(AIR_ONLY)
+    ]
+
+
+@pytest.mark.parametrize(
+    ("map_file", "start", "end", "mode", "message"),
+    [
+        (EUROPE, "Atlantis", "Milan", AIR_ONLY, "Unknown hub: Atlantis."),
+        (EUROPE, "Milan", "Milan", AIR_ONLY,
+         "Start and end hubs must be different."),
+        (EUROPE, "Reykjavik", "Milan", MIXED,
+         "Mixed is not available on this map. Available modes: Air only."),
+        (EUROPE, "Reykjavik", "Milan", ROAD_ONLY,
+         "Road only is not available on this map. "
+         "Available modes: Air only."),
+    ],
+)
+def test_hubs_and_modes_are_checked_as_for_a_run(
+    map_file: Path, start: str, end: str, mode: RoutingMode, message: str
+) -> None:
+    with pytest.raises(ScenarioError) as error:
+        check_route(map_file, start, end, mode)
+
+    assert str(error.value) == message
+
+
+def test_a_blocked_hub_is_rejected(tmp_path: Path) -> None:
+    with pytest.raises(ScenarioError) as error:
+        check_route(write_map(tmp_path, BLOCKED_MAP), "a", "wall", AIR_ONLY)
+
+    assert str(error.value) == "A start or end hub cannot be blocked: wall."
+
+
+def test_a_map_without_lanes_has_no_mode_to_check(tmp_path: Path) -> None:
+    with pytest.raises(ScenarioError) as error:
+        check_route(write_map(tmp_path, NO_LANES), "a", "c", AIR_ONLY)
+
+    assert str(error.value) == (
+        "Air only is not available on this map. Available modes: none."
+    )
+
+
+def test_the_check_runs_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No simulator, no weather and no use of the global random state."""
+    def must_not_be_called(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("the route check must not start a run")
+
+    monkeypatch.setattr(scenario, "Simulator", must_not_be_called)
+    monkeypatch.setattr(scenario, "RandomWeather", must_not_be_called)
+    saved = random.getstate()
+
+    for mode in RoutingMode:
+        check_route(GERMANY, "Kiel", "Dresden", mode)
+    check_route(GERMANY, "Kiel", "Munich", AIR_ONLY)
+
+    assert random.getstate() == saved
+
+
+def test_each_check_reads_its_own_graph(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The graphs a check loads keep the map's capacities and only the
+    chosen hubs as terminals; the map file is only read."""
+    loaded: list[Graph] = []
+    load = scenario.load_scenario_graph
+
+    def recording_load(map_path: str | Path, start: str, end: str) -> Graph:
+        graph = load(map_path, start, end)
+        loaded.append(graph)
+        return graph
+
+    monkeypatch.setattr(scenario, "load_scenario_graph", recording_load)
+    before = hashlib.sha256(GERMANY.read_bytes()).hexdigest()
+
+    check_route(GERMANY, "Kiel", "Munich", AIR_ONLY)
+    check_route(GERMANY, "Munich", "Kiel", ROAD_ONLY)
+
+    assert hashlib.sha256(GERMANY.read_bytes()).hexdigest() == before
+    assert len(loaded) == 2 and loaded[0] is not loaded[1]
+    map_graph, _ = Parser().parse(str(GERMANY))
+    for graph, (start, end) in zip(loaded, [("Kiel", "Munich"),
+                                            ("Munich", "Kiel")]):
+        assert terminals(graph) == ([start], [end])
+        for name, zone in graph.zones.items():
+            assert zone.max_drones == map_graph.zones[name].max_drones
+
+
+def test_repeated_checks_agree() -> None:
+    first = check_route(GERMANY, "Kiel", "Munich", AIR_ONLY)
+    check_route(GERMANY, "Kiel", "Dresden", ROAD_ONLY)
+    check_route(EUROPE, "Reykjavik", "Milan", AIR_ONLY)
+
+    assert check_route(GERMANY, "Kiel", "Munich", AIR_ONLY) == first
+
+
+def test_a_check_changes_no_later_run() -> None:
+    """A run after checks is the run without them, and the mode the check
+    shows runs to delivery."""
+    before = run_with_events(GERMANY, "Kiel", "Munich", 10, 3)
+
+    check = check_route(GERMANY, "Kiel", "Munich", AIR_ONLY)
+    check_route(GERMANY, "Kiel", "Dresden", ROAD_ONLY)
+    after = run_with_events(GERMANY, "Kiel", "Munich", 10, 3)
+
+    assert after == before
+    assert check.mode is MIXED
+    shown = run_scenario(GERMANY, "Kiel", "Munich", 10, 3, mode=check.mode)
+    assert shown == before[0]
+    assert shown.status is ScenarioStatus.DELIVERED
+
+
+@pytest.mark.parametrize("mode", list(RoutingMode))
+def test_no_route_in_the_check_is_no_route_in_the_run(
+    tmp_path: Path, mode: RoutingMode
+) -> None:
+    """The check and the simulator search alike in clear weather."""
+    map_file = write_map(tmp_path, APART)
+
+    assert check_route(map_file, "S", "E", mode).status is NO_ROUTE
+    result = run_scenario(map_file, "S", "E", 2, 0, mode=mode)
+    assert result.status is ScenarioStatus.NO_ROUTE
