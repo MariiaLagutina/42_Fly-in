@@ -22,6 +22,8 @@ hub (ADR-010, ADR-017).
 
 from dataclasses import dataclass
 
+import pytest
+
 from airlanes.events import (
     AgentInTransit,
     AgentMoved,
@@ -34,12 +36,13 @@ from airlanes.events import (
 )
 from airlanes.model.graph import Graph
 from airlanes.model.transport_mode import TransportMode
-from airlanes.model.zone import ZoneType
+from airlanes.model.zone import Zone, ZoneType
 from airlanes.output.text import Visualizer, movement_tokens
 from airlanes.results import Arrival, Departure, Reroute
+from airlanes.routing.pathfinder import Pathfinder
 from airlanes.routing.policy import RoutingPolicy
 from airlanes.simulation.engine import Simulator
-from airlanes.world.weather import WeatherProvider
+from airlanes.world.weather import WeatherProvider, WeatherState
 
 
 class EventRecorder:
@@ -401,6 +404,62 @@ def delivery_turns(run: SimulationRun) -> dict[str, int]:
         for event in run.events
         if isinstance(event, AgentMoved) and event.delivered
     }
+
+
+def departure_modes(run: SimulationRun) -> set[TransportMode]:
+    """The modes of every lane an aircraft departed on."""
+    lanes = {lane.name(): lane for lane in run.graph.connections}
+    return {
+        lanes[outcome.lane].mode
+        for result in run.simulator.turns
+        for outcome in result.outcomes
+        if isinstance(outcome, Departure)
+    }
+
+
+@dataclass(frozen=True)
+class RouteSearch:
+    """One `Pathfinder.find_route` call: under which policy and weather it
+    searched from `start`, which hubs it avoided, and the route it found."""
+
+    policy: RoutingPolicy
+    start: str
+    weather: WeatherState
+    avoid: frozenset[str]
+    route: tuple[str, ...] | None
+
+
+def record_route_searches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[RouteSearch]:
+    """
+    Record every route search from now on. Weather replanning and
+    deadlock handling both search with `find_route`; the cooperative
+    planner calls it once in clear weather to check that a route exists.
+    """
+    searches: list[RouteSearch] = []
+    find_route = Pathfinder.find_route
+
+    def recording_find_route(
+        pathfinder: Pathfinder,
+        start: Zone,
+        end: Zone,
+        weather: WeatherState,
+        road_km: int = 0,
+        avoid: frozenset[str] = frozenset(),
+    ) -> list[Zone] | None:
+        route = find_route(pathfinder, start, end, weather, road_km, avoid)
+        searches.append(RouteSearch(
+            pathfinder.policy,
+            start.name,
+            weather,
+            avoid,
+            None if route is None else tuple(zone.name for zone in route),
+        ))
+        return route
+
+    monkeypatch.setattr(Pathfinder, "find_route", recording_find_route)
+    return searches
 
 
 def committed_hub_load_by_turn(
