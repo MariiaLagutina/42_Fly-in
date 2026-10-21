@@ -1,11 +1,12 @@
 """Scenarios (ADR-029): chosen start and end hubs on a fresh graph, the
-vehicle count, and runs with typed results."""
+vehicle count, routing modes, and runs with typed results."""
 
 import hashlib
 from itertools import permutations
 import math
 from pathlib import Path
 import sys
+from typing import Any
 
 import pytest
 
@@ -18,26 +19,35 @@ from airlanes.events import (
 )
 from airlanes.mapfile import Parser
 from airlanes.model.graph import Graph
+from airlanes.model.transport_mode import TransportMode
+from airlanes.routing.policy import RoutingPolicy
 from airlanes.scenario import (
     DEFAULT_VEHICLE_COUNT,
     MAX_VEHICLE_COUNT,
     MIN_VEHICLE_COUNT,
+    RoutingMode,
     ScenarioError,
     ScenarioResult,
     ScenarioStatus,
+    available_routing_modes,
     load_scenario_graph,
     normalize_vehicle_count,
+    routing_policy,
     run_scenario,
 )
+from airlanes.simulation.engine import Simulator
 from airlanes.world.weather import (
     RandomWeather,
     ScriptedWeather,
     WeatherCondition,
 )
 
+from tests.support.graphs import Link, build_graph, end_hub, hub, start_hub
 from tests.support.simulation import (
     EventRecorder,
+    SimulationRun,
     check_invariants,
+    departure_modes,
     run_simulation,
 )
 
@@ -587,3 +597,268 @@ def test_the_turn_limit_ends_the_run(
     assert result.message == (
         "Stopped after 10000 turns. 0 of 1 vehicle reached goal."
     )
+
+
+# --- Routing modes -----------------------------------------------------------
+
+AIR, ROAD = TransportMode.AIR, TransportMode.ROAD
+MIXED = RoutingMode.MIXED
+ROAD_ONLY = RoutingMode.ROAD_ONLY
+AIR_ONLY = RoutingMode.AIR_ONLY
+
+
+def test_the_modes_in_presentation_order() -> None:
+    assert [(mode, mode.value) for mode in RoutingMode] == [
+        (MIXED, "Mixed"),
+        (ROAD_ONLY, "Road only"),
+        (AIR_ONLY, "Air only"),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("mode", "policy"),
+    [
+        (MIXED, RoutingPolicy(700, frozenset({AIR, ROAD}))),
+        (ROAD_ONLY, RoutingPolicy(None, frozenset({ROAD}))),
+        (AIR_ONLY, RoutingPolicy(700, frozenset({AIR}))),
+    ],
+)
+def test_each_mode_has_its_routing_policy(
+    mode: RoutingMode, policy: RoutingPolicy
+) -> None:
+    assert routing_policy(mode) == policy
+
+
+def test_mixed_is_the_policy_the_simulator_uses_by_default() -> None:
+    graph, nb_aircraft = Parser().parse(str(GERMANY))
+
+    assert routing_policy(MIXED) == Simulator(graph, nb_aircraft).policy
+
+
+def test_germany_offers_every_mode() -> None:
+    graph, _ = Parser().parse(str(GERMANY))
+
+    assert available_routing_modes(graph) == (MIXED, ROAD_ONLY, AIR_ONLY)
+
+
+def test_europe_offers_air_only() -> None:
+    graph, _ = Parser().parse(str(EUROPE))
+
+    assert available_routing_modes(graph) == (AIR_ONLY,)
+
+
+@pytest.mark.parametrize(
+    ("modes", "offered"),
+    [
+        pytest.param([AIR], (AIR_ONLY,), id="air"),
+        pytest.param([ROAD], (ROAD_ONLY,), id="road"),
+        pytest.param([ROAD, AIR], (MIXED, ROAD_ONLY, AIR_ONLY), id="mixed"),
+        pytest.param([AIR, ROAD], (MIXED, ROAD_ONLY, AIR_ONLY), id="mixed-2"),
+        pytest.param([], (), id="no-lanes"),
+    ],
+)
+def test_the_offered_modes_follow_the_lanes(
+    modes: list[TransportMode], offered: tuple[RoutingMode, ...]
+) -> None:
+    hubs = ["start", *(f"h{i}" for i in range(len(modes))), "goal"]
+    graph = build_graph(
+        [start_hub(), *(hub(name) for name in hubs[1:-1]), end_hub()],
+        [
+            Link(here, there, distance=100, mode=mode)
+            for here, there, mode in zip(hubs, hubs[1:], modes)
+        ],
+    )
+
+    assert available_routing_modes(graph) == offered
+
+
+def test_a_mode_is_offered_without_a_route_between_the_hubs() -> None:
+    """Kiel's only lane is a road, so Air only has no route from Kiel. The
+    map still offers it, and running it reports the missing route."""
+    graph = load_scenario_graph(GERMANY, "Kiel", "Munich")
+
+    assert AIR_ONLY in available_routing_modes(graph)
+    result = run_scenario(GERMANY, "Kiel", "Munich", 3, 0, mode=AIR_ONLY)
+    assert result.status is ScenarioStatus.NO_ROUTE
+    assert result.message == (
+        "No route from Kiel to Munich. 0 of 3 vehicles reached Munich."
+    )
+
+
+def recorded_runs(monkeypatch: pytest.MonkeyPatch) -> list[SimulationRun]:
+    """Every run the scenario starts from now on, with its events, for the
+    invariant checker."""
+    runs: list[SimulationRun] = []
+
+    def recording_simulator(*args: Any, **kwargs: Any) -> Simulator:
+        simulator = Simulator(*args, **kwargs)
+        recorder = EventRecorder()
+        assert simulator.dispatcher is not None
+        simulator.dispatcher.add_listener(recorder)
+        runs.append(SimulationRun(
+            simulator.graph, len(simulator.drones), simulator,
+            recorder.events, [],
+        ))
+        return simulator
+
+    monkeypatch.setattr(scenario, "Simulator", recording_simulator)
+    return runs
+
+
+@pytest.mark.parametrize("mode", list(RoutingMode))
+def test_a_scenario_runs_in_every_mode(
+    mode: RoutingMode, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Hamburg and Berlin are joined by an air lane and by road."""
+    runs = recorded_runs(monkeypatch)
+
+    result = run_scenario(GERMANY, "Hamburg", "Berlin", 10, 0, mode=mode)
+
+    assert result.status is ScenarioStatus.DELIVERED
+    assert result.delivered == 10
+    [run] = runs
+    assert run.simulator.policy == routing_policy(mode)
+    assert check_invariants(run) == []
+    assert departure_modes(run) <= routing_policy(mode).transport_modes
+
+
+def test_road_only_drives_kiel_to_dresden(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """730 km of consecutive road, beyond the 700 km of Mixed."""
+    runs = recorded_runs(monkeypatch)
+
+    result = run_scenario(GERMANY, "Kiel", "Dresden", 10, 0, mode=ROAD_ONLY)
+
+    assert result.status is ScenarioStatus.DELIVERED
+    assert result.delivered == 10
+    [run] = runs
+    assert check_invariants(run) == []
+    assert departure_modes(run) == {ROAD}
+    assert {d.road_km_since_air for d in run.simulator.drones} == {730}
+
+
+def test_air_only_departs_on_no_road(monkeypatch: pytest.MonkeyPatch) -> None:
+    runs = recorded_runs(monkeypatch)
+
+    result = run_scenario(
+        GERMANY, "Frankfurt", "Munich", 10, 0, mode=AIR_ONLY
+    )
+
+    assert result.status is ScenarioStatus.DELIVERED
+    [run] = runs
+    assert check_invariants(run) == []
+    assert departure_modes(run) == {AIR}
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "seed"),
+    [("Berlin", "Munich", 0), ("Kiel", "Dresden", 1), ("Munich", "Kiel", 2)],
+)
+def test_mixed_runs_as_a_scenario_without_a_mode(
+    start: str, end: str, seed: int
+) -> None:
+    before = run_with_events(GERMANY, start, end, 10, seed)
+    recorder = EventRecorder()
+
+    mixed = run_scenario(
+        GERMANY, start, end, 10, seed, [recorder], mode=MIXED
+    )
+
+    assert (mixed, list(recorder.events)) == before
+
+
+def test_air_only_on_europe_runs_as_a_scenario_without_a_mode() -> None:
+    before = run_with_events(EUROPE, "Reykjavik", "Athens", 10, 0)
+    recorder = EventRecorder()
+
+    air = run_scenario(
+        EUROPE, "Reykjavik", "Athens", 10, 0, [recorder], mode=AIR_ONLY
+    )
+
+    assert (air, list(recorder.events)) == before
+
+
+@pytest.mark.parametrize("mode", [MIXED, ROAD_ONLY])
+def test_a_mode_the_map_does_not_offer_is_rejected(
+    mode: RoutingMode, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runs = recorded_runs(monkeypatch)
+
+    with pytest.raises(ScenarioError) as error:
+        run_scenario(EUROPE, "Reykjavik", "Athens", 10, 0, mode=mode)
+
+    assert str(error.value) == (
+        f"{mode.value} is not available on this map. "
+        "Available modes: Air only."
+    )
+    assert runs == []
+
+
+NO_LANES = (
+    "nb_drones: 1\n"
+    "start_hub: a 0 0\n"
+    "end_hub: c 2 0\n"
+)
+
+
+def test_a_map_without_lanes_offers_no_mode(tmp_path: Path) -> None:
+    map_file = write_map(tmp_path, NO_LANES)
+
+    with pytest.raises(ScenarioError) as error:
+        run_scenario(map_file, "a", "c", 1, 0, mode=AIR_ONLY)
+
+    assert str(error.value) == (
+        "Air only is not available on this map. Available modes: none."
+    )
+
+
+def test_a_map_without_lanes_has_no_route_without_a_mode(
+    tmp_path: Path,
+) -> None:
+    """As before routing modes existed."""
+    result = run_scenario(write_map(tmp_path, NO_LANES), "a", "c", 1, 0)
+
+    assert result.status is ScenarioStatus.NO_ROUTE
+
+
+def test_the_hubs_are_checked_before_the_mode() -> None:
+    with pytest.raises(ScenarioError) as error:
+        run_scenario(EUROPE, "Atlantis", "Athens", 10, mode=MIXED)
+
+    assert str(error.value) == "Unknown hub: Atlantis."
+
+
+def test_runs_in_different_modes_share_no_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A run in another mode, with other hubs, leaves nothing behind: the
+    same scenario runs the same, each run on its own graph with its own
+    vehicles, and each graph has the map's capacities."""
+    runs = recorded_runs(monkeypatch)
+
+    first = run_with_events(GERMANY, "Kiel", "Dresden", 10, 5)
+    recorder = EventRecorder()
+    road = run_scenario(
+        GERMANY, "Kiel", "Dresden", 10, 5, [recorder], mode=ROAD_ONLY
+    )
+    other = run_scenario(GERMANY, "Dresden", "Kiel", 100, 6, mode=MIXED)
+    again = run_scenario(
+        GERMANY, "Kiel", "Dresden", 10, 5, [EventRecorder()], mode=ROAD_ONLY
+    )
+
+    assert other.status is ScenarioStatus.DELIVERED
+    assert again == road != first[0]
+    road_only = routing_policy(ROAD_ONLY)
+    assert [run.simulator.policy for run in runs] == [
+        RoutingPolicy(), road_only, RoutingPolicy(), road_only,
+    ]
+    assert runs[1].events == runs[3].events
+    assert len({id(run.graph) for run in runs}) == 4
+    assert len({id(d) for run in runs for d in run.simulator.drones}) == 130
+    map_graph, _ = Parser().parse(str(GERMANY))
+    for run in runs:
+        assert check_invariants(run) == []
+        for name, zone in run.graph.zones.items():
+            assert zone.max_drones == map_graph.zones[name].max_drones
+    assert list(recorder.events) == runs[1].events

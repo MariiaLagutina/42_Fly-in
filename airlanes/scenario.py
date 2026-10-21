@@ -10,6 +10,11 @@ only read.
 The number of vehicles is one count for the whole fleet, chosen by the user
 rather than taken from the map.
 
+A routing mode is the user's choice of which of the map's lanes routing may
+use. It becomes the run's routing policy; it changes no lane of the graph
+and is not a property of a vehicle. A map offers the modes its own lanes
+allow. That says nothing about a route between two particular hubs.
+
 Running a scenario builds everything a run uses anew: the graph, the
 weather, the event dispatcher and the simulator. How the run ended is told
 apart by the type of the simulator's exception, never by its message.
@@ -23,8 +28,10 @@ from pathlib import Path
 from airlanes.events import EventDispatcher, EventListener
 from airlanes.mapfile import INTEGER, Parser
 from airlanes.model.graph import Graph
+from airlanes.model.transport_mode import TransportMode
 from airlanes.model.zone import Zone
 from airlanes.results import TurnResult
+from airlanes.routing.policy import RoutingPolicy
 from airlanes.simulation.deadlock import DeadlockError
 from airlanes.simulation.engine import NoRouteError, Simulator, TurnLimitError
 from airlanes.world.weather import RandomWeather
@@ -37,7 +44,51 @@ MAX_VEHICLE_COUNT = 100
 
 
 class ScenarioError(ValueError):
-    """The chosen hubs or vehicle count cannot be used for a scenario."""
+    """The chosen hubs, vehicle count or routing mode cannot be used for a
+    scenario."""
+
+
+class RoutingMode(Enum):
+    """
+    Which lanes routing may use in a scenario (ADR-029), in the order the
+    application presents them. Unlike `TransportMode`, which is how one
+    lane travels, a routing mode applies to the whole run.
+    """
+
+    MIXED = "Mixed"
+    ROAD_ONLY = "Road only"
+    AIR_ONLY = "Air only"
+
+
+def routing_policy(mode: RoutingMode) -> RoutingPolicy:
+    """
+    The routing policy of a mode. Mixed is the default policy, as the CLI
+    runs: every mode, 700 km of consecutive road. Road only has no road
+    limit; for Air only, which drives no road, the limit has no effect.
+    """
+    match mode:
+        case RoutingMode.MIXED:
+            return RoutingPolicy()
+        case RoutingMode.ROAD_ONLY:
+            return RoutingPolicy(None, frozenset({TransportMode.ROAD}))
+        case RoutingMode.AIR_ONLY:
+            return RoutingPolicy(
+                transport_modes=frozenset({TransportMode.AIR})
+            )
+
+
+def available_routing_modes(graph: Graph) -> tuple[RoutingMode, ...]:
+    """
+    The routing modes the map's lanes allow, in presentation order. Mixed
+    needs lanes of both modes, Road only a road lane and Air only an air
+    lane. A graph without lanes allows none. Whether a mode has a route
+    between two particular hubs is not checked here.
+    """
+    modes = {connection.mode for connection in graph.connections}
+    return tuple(
+        mode for mode in RoutingMode
+        if routing_policy(mode).transport_modes <= modes
+    )
 
 
 class ScenarioStatus(Enum):
@@ -95,6 +146,7 @@ def run_scenario(
     vehicles: int,
     weather_seed: int | None = None,
     listeners: Iterable[EventListener] = (),
+    mode: RoutingMode | None = None,
 ) -> ScenarioResult:
     """
     Run `vehicles` vehicles from `start` to `end` on a fresh graph of the
@@ -104,9 +156,17 @@ def run_scenario(
     scenario are identical. `listeners` receive the run's events. The
     vehicle count must already be a whole number in the allowed range;
     `normalize_vehicle_count` turns user input into one.
+
+    With a `mode`, routing follows that mode's policy, and a mode the map
+    does not offer is a ScenarioError: the mode is never changed here.
+    Without one, the run uses the default policy, as before modes existed.
     """
     _check_vehicle_count(vehicles)
     graph = load_scenario_graph(map_path, start, end)
+    policy = None
+    if mode is not None:
+        _check_mode(graph, mode)
+        policy = routing_policy(mode)
     dispatcher = EventDispatcher()
     for listener in listeners:
         dispatcher.add_listener(listener)
@@ -115,6 +175,7 @@ def run_scenario(
         vehicles,
         dispatcher,
         weather=RandomWeather(graph, seed=weather_seed),
+        policy=policy,
     )
 
     try:
@@ -156,6 +217,16 @@ def _check_vehicle_count(vehicles: int) -> None:
         raise ScenarioError(
             f"The vehicle count must be a whole number from "
             f"{MIN_VEHICLE_COUNT} to {MAX_VEHICLE_COUNT}: {vehicles!r}."
+        )
+
+
+def _check_mode(graph: Graph, mode: RoutingMode) -> None:
+    available = available_routing_modes(graph)
+    if mode not in available:
+        offered = ", ".join(m.value for m in available) or "none"
+        raise ScenarioError(
+            f"{mode.value} is not available on this map. "
+            f"Available modes: {offered}."
         )
 
 
