@@ -143,7 +143,8 @@ class _InvariantChecker:
         self.departures: set[tuple[str, str]] = set()
         self.peak_occupancy: dict[str, int] = {}
         self.road_km: dict[str, int] = {label: 0 for label in self.positions}
-        self.max_road_km = run.simulator.policy.max_consecutive_road_km
+        self.policy = run.simulator.policy
+        self.max_road_km = self.policy.max_consecutive_road_km
 
     def fail(self, message: str) -> None:
         self.violations.append(f"turn {self.turn}: {message}")
@@ -290,13 +291,21 @@ class _InvariantChecker:
         self.departures.add((lane, origin))
 
     def _drive(self, label: str, lane: str) -> None:
-        """Track consecutive road distance; an air leg resets it."""
+        """Check that the run's routing policy permits the lane's mode, and
+        track consecutive road distance; an air leg resets it. Without a
+        budget, any distance is allowed."""
         connection = self.connections[lane]
+        if not self.policy.allows(connection):
+            self.fail(f"{label} used {connection.mode.value} lane {lane}, "
+                      "excluded by the routing policy")
         if connection.mode is not TransportMode.ROAD:
             self.road_km[label] = 0
             return
         self.road_km[label] += connection.distance
-        if self.road_km[label] > self.max_road_km:
+        if (
+            self.max_road_km is not None
+            and self.road_km[label] > self.max_road_km
+        ):
             self.fail(f"{label} drove {self.road_km[label]} km of "
                       f"consecutive road, limit {self.max_road_km}")
 

@@ -18,6 +18,7 @@ from airlanes.model.drone import DroneState
 from airlanes.model.graph import Graph
 from airlanes.model.transport_mode import TransportMode
 from airlanes.model.zone import ZoneType
+from airlanes.routing.policy import RoutingPolicy
 from airlanes.simulation.engine import Simulator
 
 from tests.support.graphs import Link, build_graph, end_hub, hub, start_hub
@@ -49,9 +50,10 @@ def fake_run(
     nb_aircraft: int,
     turns: list[list[SimulationEvent]],
     delivered: bool = True,
+    policy: RoutingPolicy | None = None,
 ) -> SimulationRun:
     """Wrap hand-written turns as a run; final simulator state is faked."""
-    simulator = Simulator(graph, nb_aircraft)
+    simulator = Simulator(graph, nb_aircraft, policy=policy)
     if delivered:
         assert graph.end_zone is not None
         for drone in simulator.drones:
@@ -190,6 +192,108 @@ def test_detects_consecutive_road_over_the_budget() -> None:
     ])
 
     assert has_violation(run, "D1 drove 800 km of consecutive road")
+
+
+def road_800_km_stream() -> list[list[SimulationEvent]]:
+    return [
+        [AgentInTransit(1, "D1", "start", "start-a", "a")],
+        [moved(2, "D1", "start", "a")],
+        [AgentInTransit(3, "D1", "a", "a-goal", "goal")],
+        [moved(4, "D1", "a", "goal")],
+    ]
+
+
+def road_800_km_graph() -> Graph:
+    return build_graph(
+        [start_hub(), hub("a"), end_hub()],
+        [
+            Link("start", "a", distance=400, mode=TransportMode.ROAD),
+            Link("a", "goal", distance=400, mode=TransportMode.ROAD),
+        ],
+    )
+
+
+def test_accepts_any_consecutive_road_without_a_budget() -> None:
+    run = fake_run(
+        road_800_km_graph(), 1, road_800_km_stream(),
+        policy=RoutingPolicy(None),
+    )
+
+    assert check_invariants(run) == []
+
+
+def test_still_enforces_a_budget_set_with_the_modes() -> None:
+    run = fake_run(
+        road_800_km_graph(), 1, road_800_km_stream(),
+        policy=RoutingPolicy(700, frozenset({TransportMode.ROAD})),
+    )
+
+    assert has_violation(run, "D1 drove 800 km of consecutive road")
+
+
+def mixed_lanes_graph() -> Graph:
+    """`start-a` is an air leg of three turns, `a-goal` a road leg of one
+    turn, and `start-goal` an air leg of one turn."""
+    return build_graph(
+        [start_hub(), hub("a"), end_hub()],
+        [
+            Link("start", "a", distance=900),
+            Link("a", "goal", distance=100, mode=TransportMode.ROAD),
+            Link("start", "goal", distance=400),
+        ],
+    )
+
+
+AIR_ONLY = RoutingPolicy(transport_modes=frozenset({TransportMode.AIR}))
+ROAD_ONLY = RoutingPolicy(None, frozenset({TransportMode.ROAD}))
+
+
+def test_detects_a_departure_on_an_excluded_air_lane() -> None:
+    run = fake_run(mixed_lanes_graph(), 1, [
+        [AgentInTransit(1, "D1", "start", "start-a", "a")],
+        [],
+        [moved(3, "D1", "start", "a")],
+        [moved(4, "D1", "a", "goal")],
+    ], policy=ROAD_ONLY)
+
+    assert has_violation(
+        run, "D1 used air lane start-a, excluded by the routing policy"
+    )
+
+
+def test_detects_a_one_turn_leg_on_an_excluded_air_lane() -> None:
+    run = fake_run(mixed_lanes_graph(), 1, [
+        [moved(1, "D1", "start", "goal")],
+    ], policy=ROAD_ONLY)
+
+    assert has_violation(
+        run, "D1 used air lane start-goal, excluded by the routing policy"
+    )
+
+
+def test_detects_a_leg_on_an_excluded_road_lane() -> None:
+    run = fake_run(mixed_lanes_graph(), 1, [
+        [AgentInTransit(1, "D1", "start", "start-a", "a")],
+        [],
+        [moved(3, "D1", "start", "a")],
+        [moved(4, "D1", "a", "goal")],
+    ], policy=AIR_ONLY)
+
+    assert has_violation(
+        run, "D1 used road lane a-goal, excluded by the routing policy"
+    )
+    assert not has_violation(run, "air lane start-a")
+
+
+def test_accepts_permitted_lanes_of_every_mode_by_default() -> None:
+    run = fake_run(mixed_lanes_graph(), 1, [
+        [AgentInTransit(1, "D1", "start", "start-a", "a")],
+        [],
+        [moved(3, "D1", "start", "a")],
+        [moved(4, "D1", "a", "goal")],
+    ])
+
+    assert check_invariants(run) == []
 
 
 def test_accepts_a_reroute_at_the_current_hub() -> None:
