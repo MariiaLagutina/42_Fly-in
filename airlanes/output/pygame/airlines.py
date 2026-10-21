@@ -1,9 +1,9 @@
 from dataclasses import dataclass
+from enum import Enum
 import math
 from pathlib import Path
 import random
 import string
-import sys
 from typing import Optional, TypedDict
 
 import pygame
@@ -74,6 +74,13 @@ class PygameAirlinesVisualizer(PygameEventCollector):
     pass
 
 
+class PlaybackExit(Enum):
+    """Why replay returned; COMPLETED says nothing about delivery success."""
+
+    COMPLETED = "completed"
+    CLOSED = "closed"
+
+
 class AirlinesWindow:
     """Main window for the airlines visualization and control panel."""
 
@@ -90,22 +97,31 @@ class AirlinesWindow:
         self,
         visualizer: PygameAirlinesVisualizer,
         view: Optional[MapView] = None,
+        *,
+        screen: Optional[pygame.Surface] = None,
+        rng: Optional[random.Random] = None,
     ) -> None:
         """`view` is the geographic view of a bundled map; None draws the
         original lanes on the plain dispatch-center background."""
         self.visualizer = visualizer
         self.graph = visualizer.graph
         self.view = view
+        self._owns_pygame = screen is None
+        self._rng = rng if rng is not None else random.Random()
 
         self._setup_layout()
-        self._setup_pygame()
-        self._load_assets()
-        self.start_hub_name = self._find_start_hub_name()
-        self._initialize_flight_data()
-        self._build_turn_indices()
-        self._setup_playback_state()
-
-        self._goto_turn(0)
+        try:
+            self._setup_pygame(screen)
+            self._load_assets()
+            self.start_hub_name = self._find_start_hub_name()
+            self._initialize_flight_data()
+            self._build_turn_indices()
+            self._setup_playback_state()
+            self._goto_turn(0)
+        except BaseException:
+            if self._owns_pygame:
+                pygame.quit()
+            raise
 
     def _setup_layout(self) -> None:
         self.map_width = 1000
@@ -113,10 +129,25 @@ class AirlinesWindow:
         self.width = self.map_width + self.sidebar_width
         self.height = UIConstants.STANDARD_HEIGHT
 
-    def _setup_pygame(self) -> None:
-        pygame.init()
-        self.screen = pygame.display.set_mode((self.width, self.height))
-        pygame.display.set_caption("Mariia's Airlanes — Dispatch Center")
+    def _setup_pygame(self, screen: Optional[pygame.Surface]) -> None:
+        if screen is None:
+            pygame.display.init()
+            pygame.font.init()
+            self.screen = pygame.display.set_mode((self.width, self.height))
+            pygame.display.set_caption("Mariia's Airlanes — Dispatch Center")
+        else:
+            if (
+                not pygame.display.get_init()
+                or not pygame.font.get_init()
+                or screen is not pygame.display.get_surface()
+                or screen.get_size() != (self.width, self.height)
+                or screen.get_flags() & pygame.OPENGL
+            ):
+                raise ValueError(
+                    "screen must be the initialized 1350 x 800 software "
+                    "display surface, with pygame.font initialized"
+                )
+            self.screen = screen
         self.clock = pygame.time.Clock()
 
         self.city_font = pygame.font.SysFont("Arial", 16, bold=True)
@@ -240,8 +271,8 @@ class AirlinesWindow:
 
     def _get_flight_info(self, drone_label: str) -> FlightInfo:
         if drone_label not in self.flight_data:
-            letter = random.choice(string.ascii_uppercase)
-            num = random.randint(100, 999)
+            letter = self._rng.choice(string.ascii_uppercase)
+            num = self._rng.randint(100, 999)
             self.flight_data[drone_label] = {
                 "flight": f"{letter}{num}",
                 "origin": "Base",
@@ -749,14 +780,26 @@ class AirlinesWindow:
         self._draw_map_controls()
         self._draw_sidebar()
 
-    def run_loop(self) -> None:
-        running = True
-        while running:
+    def run_loop(self, *, return_on_completion: bool = False) -> PlaybackExit:
+        """Run exclusively until close, or optionally the final presented turn.
+
+        Standalone windows own Pygame until this call returns, including on
+        errors. A supplied display stays owned by the suspended caller.
+        Create a fresh window for each session.
+        """
+        try:
+            return self._run_loop(return_on_completion)
+        finally:
+            if self._owns_pygame:
+                pygame.quit()
+
+    def _run_loop(self, return_on_completion: bool) -> PlaybackExit:
+        while True:
             current_time = pygame.time.get_ticks()
 
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
-                    running = False
+                    return PlaybackExit.CLOSED
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     click_x, click_y = event.pos
                     for zone in self.graph.zones.values():
@@ -795,14 +838,28 @@ class AirlinesWindow:
 
             self.draw()
             pygame.display.flip()
+            if (
+                return_on_completion
+                and self.current_turn_index == len(self.turn_indices) - 1
+            ):
+                return PlaybackExit.COMPLETED
             self.clock.tick(UIConstants.FPS)
-
-        pygame.quit()
-        sys.exit()
 
 
 def run_pygame_airlines(
-    visualizer: PygameAirlinesVisualizer, view: Optional[MapView] = None
-) -> None:
-    window = AirlinesWindow(visualizer, view)
-    window.run_loop()
+    visualizer: PygameAirlinesVisualizer,
+    view: Optional[MapView] = None,
+    *,
+    return_on_completion: bool = False,
+    screen: Optional[pygame.Surface] = None,
+    rng: Optional[random.Random] = None,
+) -> PlaybackExit:
+    """Replay in an exclusive standalone or caller-owned display.
+
+    Without a screen, this call owns Pygame and shuts it down on return or
+    failure. Otherwise the caller supplies the initialized display and font
+    subsystem, suspends its loop, and retains display and caption ownership.
+    The default holds the final frame until close, as the CLI always has.
+    """
+    window = AirlinesWindow(visualizer, view, screen=screen, rng=rng)
+    return window.run_loop(return_on_completion=return_on_completion)
