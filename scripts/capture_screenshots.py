@@ -6,7 +6,7 @@ A screenshot is the window surface of one replayed turn, or a 1:1 crop of
 it, saved without an operating-system frame. An animation is one frame
 per consecutive turn of a single run, nothing in between, saved as a
 looping GIF. Weather comes from a fixed seed, flight numbers from a fixed
-seed of the global generator, and the clock behind the rainbow hub colour
+seed of a local generator, and the clock behind the rainbow hub colour
 is frozen, so the same environment always produces the same files. Fonts
 come from the system, so other machines may render text differently.
 
@@ -43,7 +43,7 @@ from airlanes.world.weather import RandomWeather
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUT_DIR = REPO_ROOT / "docs" / "images"
 
-# Seed of the global generator, which draws the flight numbers.
+# Seed of the local generator, which draws the flight numbers.
 FLIGHT_NUMBER_SEED = 0
 # Any fixed time; the rainbow hub colour is a function of it.
 FROZEN_CLOCK = 1000.0
@@ -123,8 +123,9 @@ def seeded_dispatch_center(
     weather = RandomWeather(graph, seed=weather_seed)
     Simulator(graph, nb_aircraft, dispatcher, weather=weather).run()
 
-    random.seed(FLIGHT_NUMBER_SEED)
-    return AirlinesWindow(viewer, view_for(map_path))
+    return AirlinesWindow(
+        viewer, view_for(map_path), rng=random.Random(FLIGHT_NUMBER_SEED)
+    )
 
 
 def dispatch_center(shot: Shot) -> AirlinesWindow:
