@@ -206,6 +206,10 @@ than 700 km of consecutive road legs. An air leg resets the count. The limit
 applies to the initial plan and to every reroute, and a map whose only route
 breaks it fails before the first turn.
 
+The command line always runs with this budget and with both transport
+modes. The routing policy can also restrict routing to one mode or drop the
+budget; [routing modes](#scenarios-and-routing-modes) use that.
+
 ## Road and air legs
 
 A lane's transport mode comes from the map: `mode=air` (the default) or
@@ -363,6 +367,74 @@ around (`DeadlockError`).
 | `maps/challenger` | A 25-aircraft stress test |
 | `maps/bonus` | Germany and Europe with real cities, populations, and distances |
 
+## Scenarios and routing modes
+
+The module `airlanes.scenario` configures runs for a planned desktop
+application ([ADR-029](docs/engineering/decisions.md#adr-029)). The
+application itself does not exist yet. The command line does not use this
+module and keeps its behavior.
+
+A scenario is a map, a start hub, an end hub, one vehicle count for the
+whole fleet (1 to 100), and a routing mode. The chosen hubs become the only
+start and end hubs. The map's own start and end hubs become ordinary hubs
+with the capacity the map gives them.
+
+A lane's transport mode, `TransportMode`, is map data: air or road. A
+routing mode, `RoutingMode`, is a choice for the whole run: which of the
+map's lanes routing may use. It removes no lane, weather still acts on
+every lane, and lane capacity, hub capacity and deadlock handling work the
+same in every mode. It is not a property of a vehicle: a vehicle on a road
+lane drives, one on an air lane flies.
+
+| Routing mode | Lanes routing may use | Consecutive road |
+| --- | --- | --- |
+| Mixed | air and road | at most 700 km, as on the command line |
+| Road only | road | no limit |
+| Air only | air | no limit needed: no road is driven |
+
+The API:
+
+- `routing_policy(mode)` is the only mapping from a mode to its routing
+  policy. Mixed is the default policy.
+- `available_routing_modes(graph)` derives the modes from the map's lanes,
+  never from its file name:
+  - lanes of both modes: Mixed, Road only and Air only, in that order;
+  - only air lanes: Air only;
+  - only road lanes: Road only;
+  - no lanes: none.
+
+  Germany offers all three modes. Europe and the original challenge maps
+  offer Air only. An offered mode does not mean a route exists between two
+  particular hubs.
+- `check_route(map, start, end, mode)` checks, before a run, whether the
+  mode has a route between the hubs.
+  - It searches in clear weather, with the route search and policy the
+    simulator uses before its first turn. A lane that weather closes for a
+    while never makes a route unavailable.
+  - If the mode has no route, it tries the other offered modes in the order
+    Mixed, Road only, Air only, and proposes the first one that has a
+    route: "Air only has no route from Kiel to Munich. Mode changed to
+    Mixed. Press Start Simulation to run."
+  - If no mode has a route, it asks for other hubs.
+  - It never changes the hubs or the vehicle count, and never starts a run.
+    An application must show the proposed mode and wait for the user to
+    start the run.
+  - A route found here is structural. During the run, weather and traffic
+    can still delay it, and it can still end in a deadlock or at the turn
+    limit.
+- `run_scenario(map, start, end, vehicles, ..., mode=...)` runs a scenario
+  to a typed result: delivered, no route, deadlock or turn limit.
+  - A mode the map does not offer raises `ScenarioError`. The mode is
+    never changed silently.
+  - Without a `mode`, a run uses the default policy and does not check the
+    map's modes, as before routing modes existed. That is why such a call
+    runs on an air-only map such as Europe, where `mode=RoutingMode.MIXED`
+    is rejected: Mixed needs lanes of both modes.
+
+Every run and every route check parses the map file again. No run inherits
+terminal roles, reservations, vehicles or weather from another, and map
+files are never written.
+
 ## Architecture
 
 The application is one package, `airlanes/`. Root `main.py` and
@@ -376,6 +448,7 @@ airlanes/
 ├── world/                weather and transport rules
 ├── routing/              initial plan, route search, routing policy
 ├── simulation/           turn engine, departures, deadlocks
+├── scenario.py           configured runs: hubs, vehicle count, routing mode
 ├── events.py             typed events and the dispatcher
 ├── results.py            results of completed turns
 ├── output/               text output, Pygame viewers and their images
@@ -400,8 +473,9 @@ map file → mapfile.Parser → Graph (hubs, lanes)
 | `mapfile` | Reads map files into a `Graph`, reports `ParseError` |
 | `model` | Hubs (`zone`), lanes (`connection`), the network (`graph`), aircraft state (`drone`), and transport modes |
 | `world` | Weather providers (none, seeded random, scripted), the weather state, and the transport rules: availability and travel time under the weather |
-| `routing` | Cooperative space-time planning, reroute search, and route cost (`pathfinder`); routing limits such as the consecutive-road budget (`policy`) |
+| `routing` | Cooperative space-time planning, reroute search, and route cost (`pathfinder`); routing limits: the permitted transport modes and the consecutive-road budget (`policy`) |
 | `simulation` | Turn execution and route reconsideration (`engine`), departures under lane and hub capacity (`departures`), and deadlock resolution (`deadlock`) |
+| `scenario` | Configured runs for the planned desktop application: chosen terminals, the vehicle count, routing modes, the route check before a run, and typed results |
 | `events` | Typed events and the dispatcher |
 | `results` | Immutable results of completed turns: departures, arrivals, and reroutes |
 | `output` | Text, flight log, and capacity output (`text`); Pygame viewers, their shared helpers, and images (`pygame`) |

@@ -471,6 +471,10 @@ See [ADR-016](decisions.md#adr-016) and [ADR-017](decisions.md#adr-017).
   of a route with `max_consecutive_road_km` (700 km by default). An air leg
   resets it. Fallback arises from routing over the usable topology, not from
   a special rule.
+- **Routing modes.** A routing policy can also restrict routing to one
+  transport mode and run without a road budget
+  ([ADR-029](decisions.md#adr-029)). The default policy, every mode with
+  700 km, is unchanged.
 - **One lane per pair.** An air lane and a road lane between the same pair of
   hubs are not supported yet
   ([DECISION-009](open-decisions.md#decision-009)).
